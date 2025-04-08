@@ -839,94 +839,146 @@
 
         // Generate SQL query
         function generateSql(elements) {
-            // Start building the SQL query
-            let sql = `SELECT\n`;
+            // Start building the SQL query with BigQuery style
+            let sql = `WITH RawTraffic AS (\n`;
+            sql += `  SELECT\n`;
+            sql += `    idvisit,\n`;
+            sql += `    idvisitor,\n`;
+            sql += `    visitor_returning,\n`;
+            sql += `    config_device_type,\n`;
+            sql += `    referer_type,\n`;
+            sql += `    referer_name,\n`;
+            sql += `    campaign_name,\n`;
+            sql += `    campaign_source,\n`;
+            sql += `    visit_total_actions,\n`;
+            sql += `    visit_total_time\n`;
+            sql += `  FROM \`matomotransfers.matomo_export.log_visit\`\n`;
+            sql += `  WHERE visit_first_action_time >= '2025-01-01'\n`;
+            sql += `    AND visit_first_action_time < '2025-02-01'\n`;
+            sql += `),\n`;
 
-            // Add common metrics columns
-            sql += `  source,\n`;
-            sql += `  network,\n`;
-            sql += `  campaign_name,\n`;
-            sql += `  SUM(sessions) as sessions,\n`;
-            sql += `  SUM(conversions) as conversions,\n`;
-            sql += `  SUM(revenue) as revenue,\n`;
+            sql += `DeducedTraffic AS (\n`;
+            sql += `  SELECT\n`;
+            sql += `    idvisit,\n`;
+            sql += `    idvisitor,\n`;
+            sql += `    visitor_returning,\n`;
+            sql += `    CAST(config_device_type AS STRING) AS config_device_type,\n`;
+            sql += `    CAST(CASE\n`;
+            sql += `      WHEN referer_type = 1 THEN 'Direct'\n`;
+            sql += `      WHEN referer_type = 2 THEN 'Search Engine'\n`;
+            sql += `      WHEN referer_type = 3 THEN 'Website'\n`;
+            sql += `      WHEN referer_type = 6 THEN 'Campaign'\n`;
+            sql += `      WHEN referer_type = 7 THEN 'Social Network'\n`;
+            sql += `      ELSE 'Unknown'\n`;
+            sql += `    END AS STRING) AS deduced_source,\n`;
+            sql += `    campaign_name,\n`;
+            sql += `    campaign_source,\n`;
+            sql += `    referer_name,\n`;
+            sql += `    visit_total_actions,\n`;
+            sql += `    visit_total_time\n`;
+            sql += `  FROM RawTraffic\n`;
+            sql += `),\n`;
 
-            // Add CASE statement for network ordering
-            sql += `  CASE\n`;
+            // Create MappingDictionary with the user's mappings
+            sql += `MappingDictionary AS (\n`;
+            sql += `  SELECT * FROM UNNEST([\n`;
 
-            // Create mapping from original network to order index
-            const networkOrderMap = {};
+            // Create mapping entries from the user's mappings
+            const mappingEntries = [];
+
+            // Track outer_col and inner_col for each network and name
+            let networkCounter = {};
+            let nameCounter = {};
+
+            // First, assign outer_col (network order)
             appState.ordering.networks.forEach((prettyNetwork, index) => {
-                // Find all original networks that map to this pretty network
-                appState.mappings.forEach(mapping => {
-                    if (mapping.prettyNetwork === prettyNetwork) {
-                        networkOrderMap[mapping.originalNetwork.toLowerCase()] = index;
+                networkCounter[prettyNetwork] = index + 1; // 1-based index for outer_col
+                nameCounter[prettyNetwork] = {};
+            });
+
+            // Then, assign inner_col (name order within each network)
+            Object.entries(appState.ordering.namesByNetwork).forEach(([prettyNetwork, prettyNames]) => {
+                prettyNames.forEach((prettyName, nameIndex) => {
+                    if (nameCounter[prettyNetwork]) {
+                        nameCounter[prettyNetwork][prettyName] = nameIndex + 1; // 1-based index for inner_col
                     }
                 });
             });
 
-            // Add network ordering based on the order in the UI
-            Object.entries(networkOrderMap).forEach(([originalNetwork, orderIndex]) => {
-                sql += `    WHEN LOWER(network) = '${originalNetwork.toLowerCase()}' THEN ${orderIndex}\n`;
-            });
-
-            sql += `    ELSE 999\n`;
-            sql += `  END as network_order,\n`;
-
-            // Add CASE statement for name ordering within networks
-            sql += `  CASE\n`;
-
-            // Create mapping from original name to order index for each network
-            const nameOrderMap = {};
-
-            Object.entries(appState.ordering.namesByNetwork).forEach(([prettyNetwork, prettyNames]) => {
-                prettyNames.forEach((prettyName, nameIndex) => {
-                    // Find all original networks and names that map to this pretty network and name
-                    appState.mappings.forEach(mapping => {
-                        if (mapping.prettyNetwork === prettyNetwork && mapping.prettyName === prettyName) {
-                            const key = `${mapping.originalNetwork.toLowerCase()}-${mapping.originalName.toLowerCase()}`;
-                            nameOrderMap[key] = nameIndex;
-                        }
-                    });
-                });
-            });
-
-            // Add name ordering based on the order in the UI
-            Object.entries(nameOrderMap).forEach(([key, orderIndex]) => {
-                const [originalNetwork, originalName] = key.split('-');
-                sql += `    WHEN LOWER(network) = '${originalNetwork}' AND LOWER(campaign_name) = '${originalName}' THEN ${orderIndex}\n`;
-            });
-
-            sql += `    ELSE 999\n`;
-            sql += `  END as campaign_order\n`;
-
-            // Add FROM clause
-            sql += `FROM campaign_data\n`;
-
-            // Add WHERE clause to filter only mapped campaigns
-            sql += `WHERE (`;
-
-            // Get all unique original networks that have mappings
-            const mappedNetworks = [];
+            // Create mapping entries
             appState.mappings.forEach(mapping => {
                 if (mapping.prettyNetwork && mapping.prettyName) {
-                    mappedNetworks.push(`(LOWER(network) = '${mapping.originalNetwork.toLowerCase()}' AND LOWER(campaign_name) = '${mapping.originalName.toLowerCase()}')`);
+                    const outer_col = networkCounter[mapping.prettyNetwork] || 999;
+                    const inner_col = nameCounter[mapping.prettyNetwork]?.[mapping.prettyName] || 999;
+
+                    mappingEntries.push(
+                        `    STRUCT('${mapping.source}' AS deduced_source, ` +
+                        `${mapping.originalName ? `'${mapping.originalName}'` : 'NULL'} AS campaign_name, ` +
+                        `${mapping.originalNetwork ? `'${mapping.originalNetwork}'` : 'NULL'} AS campaign_source, ` +
+                        `${mapping.refererName ? `'${mapping.refererName}'` : 'NULL'} AS referer_name, ` +
+                        `'${mapping.prettyName}' AS pretty_name, ` +
+                        `'${mapping.prettyNetwork}' AS pretty_network, ` +
+                        `${outer_col} AS outer_col, ${inner_col} AS inner_col)`
+                    );
                 }
             });
 
-            // If no mappings, use a default condition that will return no results
-            if (mappedNetworks.length === 0) {
-                sql += `1 = 0`; // This will return no results
+            // Add mapping entries to the SQL
+            if (mappingEntries.length === 0) {
+                // Add a dummy entry if no mappings exist
+                sql += `    STRUCT('Campaign' AS deduced_source, NULL AS campaign_name, NULL AS campaign_source, NULL AS referer_name, 'No Mappings' AS pretty_name, 'Unknown' AS pretty_network, 999 AS outer_col, 999 AS inner_col)\n`;
             } else {
-                sql += mappedNetworks.join(' OR ');
+                sql += mappingEntries.join(',\n') + '\n';
             }
 
+            sql += `  ])\n`;
+            sql += `),\n`;
+
+            // Continue with the rest of the query
+            sql += `Joined AS (\n`;
+            sql += `  SELECT\n`;
+            sql += `    D.idvisit,\n`;
+            sql += `    D.idvisitor,\n`;
+            sql += `    D.visitor_returning,\n`;
+            sql += `    D.config_device_type,\n`;
+            sql += `    COALESCE(M.pretty_name, D.campaign_name, D.referer_name, D.deduced_source) AS pretty_name,\n`;
+            sql += `    COALESCE(M.pretty_network, 'Unknown') AS pretty_network,\n`;
+            sql += `    COALESCE(M.outer_col, 9999) AS outer_col,\n`;
+            sql += `    COALESCE(M.inner_col, 9999) AS inner_col,\n`;
+            sql += `    D.visit_total_actions,\n`;
+            sql += `    D.visit_total_time\n`;
+            sql += `  FROM DeducedTraffic D\n`;
+            sql += `  LEFT JOIN MappingDictionary M\n`;
+            sql += `    ON D.deduced_source = M.deduced_source\n`;
+            sql += `    AND COALESCE(NULLIF(D.campaign_name, ''), '<empty>') = COALESCE(NULLIF(M.campaign_name, ''), '<empty>')\n`;
+            sql += `    AND COALESCE(NULLIF(D.campaign_source, ''), '<empty>') = COALESCE(NULLIF(M.campaign_source, ''), '<empty>')\n`;
+            sql += `    AND COALESCE(NULLIF(D.referer_name, ''), '<empty>') = COALESCE(NULLIF(M.referer_name, ''), '<empty>')\n`;
+            sql += `),\n`;
+
+            sql += `Aggregated AS (\n`;
+            sql += `  SELECT\n`;
+            sql += `    pretty_name,\n`;
+            sql += `    pretty_network,\n`;
+            sql += `    outer_col,\n`;
+            sql += `    inner_col,\n`;
+            sql += `    COUNT(DISTINCT idvisit) AS visit_count,\n`;
+            sql += `    COUNT(DISTINCT idvisitor) AS unique_visitors,\n`;
+            sql += `    AVG(visit_total_actions) AS avg_actions,\n`;
+            sql += `    AVG(visit_total_time) AS avg_time\n`;
+            sql += `  FROM Joined\n`;
+            sql += `  GROUP BY pretty_name, pretty_network, outer_col, inner_col\n`;
             sql += `)\n`;
 
-            // Add GROUP BY
-            sql += `GROUP BY source, network, campaign_name\n`;
-
-            // Add ORDER BY
-            sql += `ORDER BY network_order, campaign_order, campaign_name`;
+            // Final query
+            sql += `SELECT\n`;
+            sql += `  pretty_name,\n`;
+            sql += `  pretty_network,\n`;
+            sql += `  visit_count,\n`;
+            sql += `  unique_visitors,\n`;
+            sql += `  ROUND(avg_actions, 2) AS avg_actions_per_visit,\n`;
+            sql += `  ROUND(avg_time / 60, 2) AS avg_duration_minutes\n`;
+            sql += `FROM Aggregated\n`;
+            sql += `ORDER BY outer_col, inner_col`;
 
             // Set SQL output
             elements.sqlOutput.value = sql;
