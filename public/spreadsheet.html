@@ -902,19 +902,62 @@
             let nameCounter = {};
 
             // First, assign outer_col (network order)
-            appState.ordering.networks.forEach((prettyNetwork, index) => {
-                networkCounter[prettyNetwork] = index + 1; // 1-based index for outer_col
-                nameCounter[prettyNetwork] = {};
-            });
-
-            // Then, assign inner_col (name order within each network)
-            Object.entries(appState.ordering.namesByNetwork).forEach(([prettyNetwork, prettyNames]) => {
-                prettyNames.forEach((prettyName, nameIndex) => {
-                    if (nameCounter[prettyNetwork]) {
-                        nameCounter[prettyNetwork][prettyName] = nameIndex + 1; // 1-based index for inner_col
+            // Make sure we have a valid ordering array
+            if (appState.ordering.networks && appState.ordering.networks.length > 0) {
+                appState.ordering.networks.forEach((prettyNetwork, index) => {
+                    if (prettyNetwork) {
+                        networkCounter[prettyNetwork] = index + 1; // 1-based index for outer_col
+                        nameCounter[prettyNetwork] = {};
                     }
                 });
-            });
+            } else {
+                // If no ordering is defined, create a default ordering based on the mappings
+                const uniqueNetworks = new Set();
+                appState.mappings.forEach(mapping => {
+                    if (mapping.prettyNetwork) {
+                        uniqueNetworks.add(mapping.prettyNetwork);
+                    }
+                });
+
+                Array.from(uniqueNetworks).sort().forEach((network, index) => {
+                    networkCounter[network] = index + 1;
+                    nameCounter[network] = {};
+                });
+            }
+
+            // Then, assign inner_col (name order within each network)
+            if (appState.ordering.namesByNetwork && Object.keys(appState.ordering.namesByNetwork).length > 0) {
+                Object.entries(appState.ordering.namesByNetwork).forEach(([prettyNetwork, prettyNames]) => {
+                    if (prettyNames && prettyNames.length > 0) {
+                        prettyNames.forEach((prettyName, nameIndex) => {
+                            if (nameCounter[prettyNetwork] && prettyName) {
+                                nameCounter[prettyNetwork][prettyName] = nameIndex + 1; // 1-based index for inner_col
+                            }
+                        });
+                    }
+                });
+            } else {
+                // If no name ordering is defined, create a default ordering based on the mappings
+                const namesByNetwork = {};
+
+                appState.mappings.forEach(mapping => {
+                    if (mapping.prettyNetwork && mapping.prettyName) {
+                        if (!namesByNetwork[mapping.prettyNetwork]) {
+                            namesByNetwork[mapping.prettyNetwork] = new Set();
+                        }
+                        namesByNetwork[mapping.prettyNetwork].add(mapping.prettyName);
+                    }
+                });
+
+                Object.entries(namesByNetwork).forEach(([network, names]) => {
+                    Array.from(names).sort().forEach((name, index) => {
+                        if (!nameCounter[network]) {
+                            nameCounter[network] = {};
+                        }
+                        nameCounter[network][name] = index + 1;
+                    });
+                });
+            }
 
             // Create mapping entries
             appState.mappings.forEach(mapping => {
@@ -984,12 +1027,14 @@
             sql += `SELECT\n`;
             sql += `  pretty_name,\n`;
             sql += `  pretty_network,\n`;
+            sql += `  outer_col,\n`; // Include ordering columns in output
+            sql += `  inner_col,\n`;
             sql += `  visit_count,\n`;
             sql += `  unique_visitors,\n`;
             sql += `  ROUND(avg_actions, 2) AS avg_actions_per_visit,\n`;
             sql += `  ROUND(avg_time / 60, 2) AS avg_duration_minutes\n`;
             sql += `FROM Aggregated\n`;
-            sql += `ORDER BY outer_col, inner_col`;
+            sql += `ORDER BY outer_col, inner_col`; // This ensures results are ordered by network and campaign order
 
             // Set SQL output
             elements.sqlOutput.value = sql;
