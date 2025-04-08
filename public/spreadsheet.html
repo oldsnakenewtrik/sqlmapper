@@ -203,6 +203,10 @@
                     <button id="copySqlBtn" class="btn btn-outline-secondary">Copy to Clipboard</button>
                 </div>
                 <div class="card-body">
+                    <div class="mb-3">
+                        <label for="tableNameInput" class="form-label">Table Name:</label>
+                        <input type="text" id="tableNameInput" class="form-control" value="matomotransfers.matomo_export.log_visit" placeholder="Enter table name">
+                    </div>
                     <textarea id="sqlOutput" class="form-control" rows="10" readonly></textarea>
                 </div>
             </div>
@@ -250,6 +254,7 @@
                 generateSqlBtn: document.getElementById('generateSqlBtn'),
                 sqlOutput: document.getElementById('sqlOutput'),
                 copySqlBtn: document.getElementById('copySqlBtn'),
+                tableNameInput: document.getElementById('tableNameInput'),
                 filterInput: document.getElementById('filterInput'),
                 sourceTypeFilter: document.getElementById('sourceTypeFilter'),
                 networkFilter: document.getElementById('networkFilter'),
@@ -296,6 +301,10 @@
 
             elements.copySqlBtn.addEventListener('click', function() {
                 copySqlToClipboard(elements);
+            });
+
+            elements.tableNameInput.addEventListener('change', function() {
+                generateSql(elements);
             });
 
             elements.filterInput.addEventListener('input', function() {
@@ -852,7 +861,9 @@
             sql += `    campaign_source,\n`;
             sql += `    visit_total_actions,\n`;
             sql += `    visit_total_time\n`;
-            sql += `  FROM \`matomotransfers.matomo_export.log_visit\`\n`;
+            // Get the table name from the input field
+            const tableName = elements.tableNameInput.value.trim() || 'matomotransfers.matomo_export.log_visit';
+            sql += `  FROM \`${tableName}\`\n`;
             sql += `  WHERE visit_first_action_time >= '2025-01-01'\n`;
             sql += `    AND visit_first_action_time < '2025-02-01'\n`;
             sql += `),\n`;
