@@ -217,6 +217,7 @@
                     <div class="mb-3">
                         <label for="tableNameInput" class="form-label">Table Name:</label>
                         <input type="text" id="tableNameInput" class="form-control" value="matomotransfers.matomo_export.log_visit" placeholder="Enter table name">
+                        <small class="form-text text-muted">Default tables: Matomo = matomotransfers.matomo_export.log_visit, RedTrack = matomotransfers.rt_streamer.log_visit</small>
                     </div>
                     <textarea id="sqlOutput" class="form-control" rows="10" readonly></textarea>
                 </div>
@@ -289,6 +290,8 @@
                 if (this.checked) {
                     appState.dataFormat = 'matomo';
                     console.log('Data format set to Matomo');
+                    // Update default table name
+                    elements.tableNameInput.value = 'matomotransfers.matomo_export.log_visit';
                     // If data is already loaded, reprocess it
                     if (appState.csvData.length > 0) {
                         initializeMappings(elements);
@@ -300,6 +303,8 @@
                 if (this.checked) {
                     appState.dataFormat = 'redtrack';
                     console.log('Data format set to RedTrack');
+                    // Update default table name
+                    elements.tableNameInput.value = 'matomotransfers.rt_streamer.log_visit';
                     // If data is already loaded, reprocess it
                     if (appState.csvData.length > 0) {
                         initializeMappings(elements);
@@ -409,6 +414,24 @@
             if (!file) return;
 
             elements.uploadStatus.innerHTML = '<div class="alert alert-info">Processing file...</div>';
+
+            // Auto-detect format based on filename
+            const filename = file.name.toLowerCase();
+            if (filename.includes('redtrack')) {
+                // Set format to RedTrack
+                appState.dataFormat = 'redtrack';
+                elements.formatRedTrack.checked = true;
+                elements.formatMatomo.checked = false;
+                elements.tableNameInput.value = 'matomotransfers.rt_streamer.log_visit';
+                console.log('Format auto-detected as RedTrack based on filename');
+            } else if (filename.includes('matomo')) {
+                // Set format to Matomo
+                appState.dataFormat = 'matomo';
+                elements.formatMatomo.checked = true;
+                elements.formatRedTrack.checked = false;
+                elements.tableNameInput.value = 'matomotransfers.matomo_export.log_visit';
+                console.log('Format auto-detected as Matomo based on filename');
+            }
 
             Papa.parse(file, {
                 header: true,
