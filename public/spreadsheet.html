@@ -97,6 +97,17 @@
                 <div class="mb-3">
                     <input type="file" id="csvFile" accept=".csv" class="form-control">
                 </div>
+                <div class="mb-3">
+                    <label class="form-label">Data Format:</label>
+                    <div class="form-check form-check-inline">
+                        <input class="form-check-input" type="radio" name="dataFormat" id="formatMatomo" value="matomo" checked>
+                        <label class="form-check-label" for="formatMatomo">Matomo</label>
+                    </div>
+                    <div class="form-check form-check-inline">
+                        <input class="form-check-input" type="radio" name="dataFormat" id="formatRedTrack" value="redtrack">
+                        <label class="form-check-label" for="formatRedTrack">RedTrack</label>
+                    </div>
+                </div>
                 <div id="uploadStatus"></div>
                 <button id="loadSampleBtn" class="btn btn-outline-secondary">Load Sample Data</button>
                 <button id="copyFromOriginalBtn" class="btn btn-outline-secondary ms-2">Copy from Original CSV</button>
@@ -226,6 +237,7 @@
             mappings: [],
             selectedCell: null,
             copiedValue: null,
+            dataFormat: 'matomo', // Default to Matomo format
             filters: {
                 text: '',
                 sourceType: '',
@@ -242,6 +254,8 @@
         document.addEventListener('DOMContentLoaded', function() {
             const elements = {
                 csvFile: document.getElementById('csvFile'),
+                formatMatomo: document.getElementById('formatMatomo'),
+                formatRedTrack: document.getElementById('formatRedTrack'),
                 loadSampleBtn: document.getElementById('loadSampleBtn'),
                 copyFromOriginalBtn: document.getElementById('copyFromOriginalBtn'),
                 uploadStatus: document.getElementById('uploadStatus'),
@@ -269,6 +283,28 @@
             // Set up event listeners
             elements.csvFile.addEventListener('change', function(event) {
                 handleFileUpload(event, elements);
+            });
+
+            elements.formatMatomo.addEventListener('change', function() {
+                if (this.checked) {
+                    appState.dataFormat = 'matomo';
+                    console.log('Data format set to Matomo');
+                    // If data is already loaded, reprocess it
+                    if (appState.csvData.length > 0) {
+                        initializeMappings(elements);
+                    }
+                }
+            });
+
+            elements.formatRedTrack.addEventListener('change', function() {
+                if (this.checked) {
+                    appState.dataFormat = 'redtrack';
+                    console.log('Data format set to RedTrack');
+                    // If data is already loaded, reprocess it
+                    if (appState.csvData.length > 0) {
+                        initializeMappings(elements);
+                    }
+                }
             });
 
             elements.loadSampleBtn.addEventListener('click', function() {
@@ -433,41 +469,75 @@
             // Create a unique list of entries based on source type
             const uniqueEntries = new Map();
 
-            appState.csvData.forEach((row, index) => {
-                let key;
-                let entry;
+            if (appState.dataFormat === 'matomo') {
+                // Process Matomo format
+                appState.csvData.forEach((row, index) => {
+                    let key;
+                    let entry;
 
-                // Handle different source types differently
-                if (row.deduced_source === 'Campaign') {
-                    // For campaigns, use campaign_source + campaign_name as key
-                    key = `Campaign-${row.campaign_source || ''}-${row.campaign_name || ''}`;
+                    // Handle different source types differently
+                    if (row.deduced_source === 'Campaign') {
+                        // For campaigns, use campaign_source + campaign_name as key
+                        key = `Campaign-${row.campaign_source || ''}-${row.campaign_name || ''}`;
+                        entry = {
+                            id: index,
+                            source: row.deduced_source,
+                            originalName: row.campaign_name || '',
+                            originalNetwork: row.campaign_source || '',
+                            prettyNetwork: row.campaign_source || '',
+                            prettyName: row.campaign_name || '',
+                            refererName: row.referer_name || ''
+                        };
+                    } else {
+                        // For other sources (Search Engine, Social Network, Website), use referer_name as key
+                        key = `${row.deduced_source || ''}-${row.referer_name || ''}`;
+                        entry = {
+                            id: index,
+                            source: row.deduced_source || '',
+                            originalName: row.referer_name || '',
+                            originalNetwork: row.deduced_source || '',  // Use source type as network for non-campaigns
+                            prettyNetwork: row.deduced_source || '',
+                            prettyName: row.referer_name || '',
+                            refererName: row.referer_name || ''
+                        };
+                    }
+
+                    if (!uniqueEntries.has(key) && key !== '-') {
+                        uniqueEntries.set(key, entry);
+                    }
+                });
+            } else if (appState.dataFormat === 'redtrack') {
+                // Process RedTrack format
+                appState.csvData.forEach((row, index) => {
+                    let key;
+                    let entry;
+
+                    // For RedTrack, use deduced_source + campaign_name as key
+                    key = `${row.deduced_source || ''}-${row.campaign_name || ''}-${row.device_type || ''}`;
+
+                    // Determine the source and network based on the data
+                    const source = row.deduced_source || '';
+                    const campaignName = row.campaign_name || '';
+                    const utmCampaign = row.utm_campaign || '';
+                    const utmSource = row.utm_source || '';
+                    const deviceType = row.device_type || '';
+
                     entry = {
                         id: index,
-                        source: row.deduced_source,
-                        originalName: row.campaign_name || '',
-                        originalNetwork: row.campaign_source || '',
-                        prettyNetwork: row.campaign_source || '',
-                        prettyName: row.campaign_name || '',
-                        refererName: row.referer_name || ''
+                        source: source,
+                        originalName: campaignName,
+                        originalNetwork: utmSource || source, // Use utm_source if available, otherwise use deduced_source
+                        prettyNetwork: utmSource || source,
+                        prettyName: campaignName,
+                        utmCampaign: utmCampaign,
+                        deviceType: deviceType
                     };
-                } else {
-                    // For other sources (Search Engine, Social Network, Website), use referer_name as key
-                    key = `${row.deduced_source || ''}-${row.referer_name || ''}`;
-                    entry = {
-                        id: index,
-                        source: row.deduced_source || '',
-                        originalName: row.referer_name || '',
-                        originalNetwork: row.deduced_source || '',  // Use source type as network for non-campaigns
-                        prettyNetwork: row.deduced_source || '',
-                        prettyName: row.referer_name || '',
-                        refererName: row.referer_name || ''
-                    };
-                }
 
-                if (!uniqueEntries.has(key) && key !== '-') {
-                    uniqueEntries.set(key, entry);
-                }
-            });
+                    if (!uniqueEntries.has(key) && key !== '-') {
+                        uniqueEntries.set(key, entry);
+                    }
+                });
+            }
 
             appState.mappings = Array.from(uniqueEntries.values());
 
@@ -512,34 +582,93 @@
         function renderTable(elements) {
             elements.campaignTableBody.innerHTML = '';
 
+            // Update table headers based on data format
+            const tableHeaders = document.querySelector('#campaignTable thead tr');
+            if (tableHeaders) {
+                if (appState.dataFormat === 'redtrack') {
+                    // Add device type column for RedTrack format
+                    if (!document.getElementById('deviceTypeHeader')) {
+                        tableHeaders.innerHTML = `
+                            <th width="50">ID</th>
+                            <th>Source Type</th>
+                            <th>Original Name</th>
+                            <th>Original Network</th>
+                            <th>Device Type</th>
+                            <th>Pretty Network</th>
+                            <th>Pretty Name</th>
+                            <th width="100">Actions</th>
+                        `;
+                    }
+                } else {
+                    // Standard Matomo format
+                    tableHeaders.innerHTML = `
+                        <th width="50">ID</th>
+                        <th>Source Type</th>
+                        <th>Original Name</th>
+                        <th>Original Network</th>
+                        <th>Pretty Network</th>
+                        <th>Pretty Name</th>
+                        <th width="100">Actions</th>
+                    `;
+                }
+            }
+
             appState.mappings.forEach((mapping, index) => {
                 if (!shouldShowMapping(mapping)) return;
 
                 const row = document.createElement('tr');
                 row.dataset.id = mapping.id;
 
-                row.innerHTML = `
-                    <td>${mapping.id + 1}</td>
-                    <td>${mapping.source}</td>
-                    <td>${mapping.originalName}</td>
-                    <td>${mapping.originalNetwork}</td>
-                    <td>
-                        <input type="text" class="form-control network-input" value="${mapping.prettyNetwork}"
-                               data-id="${mapping.id}" data-field="prettyNetwork">
-                    </td>
-                    <td>
-                        <input type="text" class="form-control name-input" value="${mapping.prettyName}"
-                               data-id="${mapping.id}" data-field="prettyName">
-                    </td>
-                    <td class="text-center">
-                        <button class="btn btn-sm btn-outline-secondary copy-network-btn" data-id="${mapping.id}">
-                            Copy Net
-                        </button>
-                        <button class="btn btn-sm btn-outline-secondary copy-campaign-btn" data-id="${mapping.id}">
-                            Copy Camp
-                        </button>
-                    </td>
-                `;
+                if (appState.dataFormat === 'redtrack') {
+                    // RedTrack format with device type
+                    row.innerHTML = `
+                        <td>${mapping.id + 1}</td>
+                        <td>${mapping.source}</td>
+                        <td>${mapping.originalName}</td>
+                        <td>${mapping.originalNetwork}</td>
+                        <td>${mapping.deviceType || ''}</td>
+                        <td>
+                            <input type="text" class="form-control network-input" value="${mapping.prettyNetwork}"
+                                   data-id="${mapping.id}" data-field="prettyNetwork">
+                        </td>
+                        <td>
+                            <input type="text" class="form-control name-input" value="${mapping.prettyName}"
+                                   data-id="${mapping.id}" data-field="prettyName">
+                        </td>
+                        <td class="text-center">
+                            <button class="btn btn-sm btn-outline-secondary copy-network-btn" data-id="${mapping.id}">
+                                Copy Net
+                            </button>
+                            <button class="btn btn-sm btn-outline-secondary copy-campaign-btn" data-id="${mapping.id}">
+                                Copy Camp
+                            </button>
+                        </td>
+                    `;
+                } else {
+                    // Standard Matomo format
+                    row.innerHTML = `
+                        <td>${mapping.id + 1}</td>
+                        <td>${mapping.source}</td>
+                        <td>${mapping.originalName}</td>
+                        <td>${mapping.originalNetwork}</td>
+                        <td>
+                            <input type="text" class="form-control network-input" value="${mapping.prettyNetwork}"
+                                   data-id="${mapping.id}" data-field="prettyNetwork">
+                        </td>
+                        <td>
+                            <input type="text" class="form-control name-input" value="${mapping.prettyName}"
+                                   data-id="${mapping.id}" data-field="prettyName">
+                        </td>
+                        <td class="text-center">
+                            <button class="btn btn-sm btn-outline-secondary copy-network-btn" data-id="${mapping.id}">
+                                Copy Net
+                            </button>
+                            <button class="btn btn-sm btn-outline-secondary copy-campaign-btn" data-id="${mapping.id}">
+                                Copy Camp
+                            </button>
+                        </td>
+                    `;
+                }
 
                 elements.campaignTableBody.appendChild(row);
             });
@@ -670,13 +799,26 @@
             // Text filter
             if (appState.filters.text) {
                 const searchText = appState.filters.text.toLowerCase();
-                const textMatch =
-                    mapping.source.toLowerCase().includes(searchText) ||
-                    mapping.originalName.toLowerCase().includes(searchText) ||
-                    mapping.originalNetwork.toLowerCase().includes(searchText) ||
-                    mapping.prettyNetwork.toLowerCase().includes(searchText) ||
-                    mapping.prettyName.toLowerCase().includes(searchText) ||
-                    mapping.refererName.toLowerCase().includes(searchText);
+                let textMatch = false;
+
+                if (appState.dataFormat === 'redtrack') {
+                    textMatch =
+                        (mapping.source || '').toLowerCase().includes(searchText) ||
+                        (mapping.originalName || '').toLowerCase().includes(searchText) ||
+                        (mapping.originalNetwork || '').toLowerCase().includes(searchText) ||
+                        (mapping.prettyNetwork || '').toLowerCase().includes(searchText) ||
+                        (mapping.prettyName || '').toLowerCase().includes(searchText) ||
+                        (mapping.deviceType || '').toLowerCase().includes(searchText) ||
+                        (mapping.utmCampaign || '').toLowerCase().includes(searchText);
+                } else {
+                    textMatch =
+                        (mapping.source || '').toLowerCase().includes(searchText) ||
+                        (mapping.originalName || '').toLowerCase().includes(searchText) ||
+                        (mapping.originalNetwork || '').toLowerCase().includes(searchText) ||
+                        (mapping.prettyNetwork || '').toLowerCase().includes(searchText) ||
+                        (mapping.prettyName || '').toLowerCase().includes(searchText) ||
+                        (mapping.refererName || '').toLowerCase().includes(searchText);
+                }
 
                 if (!textMatch) return false;
             }
@@ -868,27 +1010,47 @@
             sql += `    AND visit_first_action_time < '2025-02-01'\n`;
             sql += `),\n`;
 
-            sql += `DeducedTraffic AS (\n`;
-            sql += `  SELECT\n`;
-            sql += `    idvisit,\n`;
-            sql += `    idvisitor,\n`;
-            sql += `    visitor_returning,\n`;
-            sql += `    CAST(config_device_type AS STRING) AS config_device_type,\n`;
-            sql += `    CAST(CASE\n`;
-            sql += `      WHEN referer_type = 1 THEN 'Direct'\n`;
-            sql += `      WHEN referer_type = 2 THEN 'Search Engine'\n`;
-            sql += `      WHEN referer_type = 3 THEN 'Website'\n`;
-            sql += `      WHEN referer_type = 6 THEN 'Campaign'\n`;
-            sql += `      WHEN referer_type = 7 THEN 'Social Network'\n`;
-            sql += `      ELSE 'Unknown'\n`;
-            sql += `    END AS STRING) AS deduced_source,\n`;
-            sql += `    campaign_name,\n`;
-            sql += `    campaign_source,\n`;
-            sql += `    referer_name,\n`;
-            sql += `    visit_total_actions,\n`;
-            sql += `    visit_total_time\n`;
-            sql += `  FROM RawTraffic\n`;
-            sql += `),\n`;
+            if (appState.dataFormat === 'redtrack') {
+                // RedTrack format
+                sql += `DeducedTraffic AS (\n`;
+                sql += `  SELECT\n`;
+                sql += `    id AS idvisit,\n`; // Use appropriate ID field
+                sql += `    visitor_id AS idvisitor,\n`; // Use appropriate visitor ID field
+                sql += `    0 AS visitor_returning,\n`; // Default value
+                sql += `    device_type AS config_device_type,\n`;
+                sql += `    deduced_source,\n`;
+                sql += `    campaign_name,\n`;
+                sql += `    utm_campaign,\n`;
+                sql += `    utm_source,\n`;
+                sql += `    device_type,\n`;
+                sql += `    1 AS visit_total_actions,\n`; // Default value
+                sql += `    0 AS visit_total_time\n`; // Default value
+                sql += `  FROM RawTraffic\n`;
+                sql += `),\n`;
+            } else {
+                // Matomo format
+                sql += `DeducedTraffic AS (\n`;
+                sql += `  SELECT\n`;
+                sql += `    idvisit,\n`;
+                sql += `    idvisitor,\n`;
+                sql += `    visitor_returning,\n`;
+                sql += `    CAST(config_device_type AS STRING) AS config_device_type,\n`;
+                sql += `    CAST(CASE\n`;
+                sql += `      WHEN referer_type = 1 THEN 'Direct'\n`;
+                sql += `      WHEN referer_type = 2 THEN 'Search Engine'\n`;
+                sql += `      WHEN referer_type = 3 THEN 'Website'\n`;
+                sql += `      WHEN referer_type = 6 THEN 'Campaign'\n`;
+                sql += `      WHEN referer_type = 7 THEN 'Social Network'\n`;
+                sql += `      ELSE 'Unknown'\n`;
+                sql += `    END AS STRING) AS deduced_source,\n`;
+                sql += `    campaign_name,\n`;
+                sql += `    campaign_source,\n`;
+                sql += `    referer_name,\n`;
+                sql += `    visit_total_actions,\n`;
+                sql += `    visit_total_time\n`;
+                sql += `  FROM RawTraffic\n`;
+                sql += `),\n`;
+            }
 
             // Create MappingDictionary with the user's mappings
             sql += `MappingDictionary AS (\n`;
@@ -965,15 +1127,30 @@
                     const outer_col = networkCounter[mapping.prettyNetwork] || 999;
                     const inner_col = nameCounter[mapping.prettyNetwork]?.[mapping.prettyName] || 999;
 
-                    mappingEntries.push(
-                        `    STRUCT('${mapping.source}' AS deduced_source, ` +
-                        `${mapping.originalName ? `'${mapping.originalName}'` : 'NULL'} AS campaign_name, ` +
-                        `${mapping.originalNetwork ? `'${mapping.originalNetwork}'` : 'NULL'} AS campaign_source, ` +
-                        `${mapping.refererName ? `'${mapping.refererName}'` : 'NULL'} AS referer_name, ` +
-                        `'${mapping.prettyName}' AS pretty_name, ` +
-                        `'${mapping.prettyNetwork}' AS pretty_network, ` +
-                        `${outer_col} AS outer_col, ${inner_col} AS inner_col)`
-                    );
+                    if (appState.dataFormat === 'redtrack') {
+                        // RedTrack format
+                        mappingEntries.push(
+                            `    STRUCT('${mapping.source}' AS deduced_source, ` +
+                            `${mapping.originalName ? `'${mapping.originalName}'` : 'NULL'} AS campaign_name, ` +
+                            `${mapping.utmCampaign ? `'${mapping.utmCampaign}'` : 'NULL'} AS utm_campaign, ` +
+                            `${mapping.originalNetwork ? `'${mapping.originalNetwork}'` : 'NULL'} AS utm_source, ` +
+                            `${mapping.deviceType ? `'${mapping.deviceType}'` : 'NULL'} AS device_type, ` +
+                            `'${mapping.prettyName}' AS pretty_name, ` +
+                            `'${mapping.prettyNetwork}' AS pretty_network, ` +
+                            `${outer_col} AS outer_col, ${inner_col} AS inner_col)`
+                        );
+                    } else {
+                        // Matomo format
+                        mappingEntries.push(
+                            `    STRUCT('${mapping.source}' AS deduced_source, ` +
+                            `${mapping.originalName ? `'${mapping.originalName}'` : 'NULL'} AS campaign_name, ` +
+                            `${mapping.originalNetwork ? `'${mapping.originalNetwork}'` : 'NULL'} AS campaign_source, ` +
+                            `${mapping.refererName ? `'${mapping.refererName}'` : 'NULL'} AS referer_name, ` +
+                            `'${mapping.prettyName}' AS pretty_name, ` +
+                            `'${mapping.prettyNetwork}' AS pretty_network, ` +
+                            `${outer_col} AS outer_col, ${inner_col} AS inner_col)`
+                        );
+                    }
                 }
             });
 
@@ -989,25 +1166,50 @@
             sql += `),\n`;
 
             // Continue with the rest of the query
-            sql += `Joined AS (\n`;
-            sql += `  SELECT\n`;
-            sql += `    D.idvisit,\n`;
-            sql += `    D.idvisitor,\n`;
-            sql += `    D.visitor_returning,\n`;
-            sql += `    D.config_device_type,\n`;
-            sql += `    COALESCE(M.pretty_name, D.campaign_name, D.referer_name, D.deduced_source) AS pretty_name,\n`;
-            sql += `    COALESCE(M.pretty_network, 'Unknown') AS pretty_network,\n`;
-            sql += `    COALESCE(M.outer_col, 9999) AS outer_col,\n`;
-            sql += `    COALESCE(M.inner_col, 9999) AS inner_col,\n`;
-            sql += `    D.visit_total_actions,\n`;
-            sql += `    D.visit_total_time\n`;
-            sql += `  FROM DeducedTraffic D\n`;
-            sql += `  LEFT JOIN MappingDictionary M\n`;
-            sql += `    ON D.deduced_source = M.deduced_source\n`;
-            sql += `    AND COALESCE(NULLIF(D.campaign_name, ''), '<empty>') = COALESCE(NULLIF(M.campaign_name, ''), '<empty>')\n`;
-            sql += `    AND COALESCE(NULLIF(D.campaign_source, ''), '<empty>') = COALESCE(NULLIF(M.campaign_source, ''), '<empty>')\n`;
-            sql += `    AND COALESCE(NULLIF(D.referer_name, ''), '<empty>') = COALESCE(NULLIF(M.referer_name, ''), '<empty>')\n`;
-            sql += `),\n`;
+            if (appState.dataFormat === 'redtrack') {
+                // RedTrack format
+                sql += `Joined AS (\n`;
+                sql += `  SELECT\n`;
+                sql += `    D.idvisit,\n`;
+                sql += `    D.idvisitor,\n`;
+                sql += `    D.visitor_returning,\n`;
+                sql += `    D.config_device_type,\n`;
+                sql += `    COALESCE(M.pretty_name, D.campaign_name, D.deduced_source) AS pretty_name,\n`;
+                sql += `    COALESCE(M.pretty_network, 'Unknown') AS pretty_network,\n`;
+                sql += `    COALESCE(M.outer_col, 9999) AS outer_col,\n`;
+                sql += `    COALESCE(M.inner_col, 9999) AS inner_col,\n`;
+                sql += `    D.visit_total_actions,\n`;
+                sql += `    D.visit_total_time\n`;
+                sql += `  FROM DeducedTraffic D\n`;
+                sql += `  LEFT JOIN MappingDictionary M\n`;
+                sql += `    ON D.deduced_source = M.deduced_source\n`;
+                sql += `    AND COALESCE(NULLIF(D.campaign_name, ''), '<empty>') = COALESCE(NULLIF(M.campaign_name, ''), '<empty>')\n`;
+                sql += `    AND COALESCE(NULLIF(D.utm_campaign, ''), '<empty>') = COALESCE(NULLIF(M.utm_campaign, ''), '<empty>')\n`;
+                sql += `    AND COALESCE(NULLIF(D.utm_source, ''), '<empty>') = COALESCE(NULLIF(M.utm_source, ''), '<empty>')\n`;
+                sql += `    AND COALESCE(NULLIF(D.device_type, ''), '<empty>') = COALESCE(NULLIF(M.device_type, ''), '<empty>')\n`;
+                sql += `),\n`;
+            } else {
+                // Matomo format
+                sql += `Joined AS (\n`;
+                sql += `  SELECT\n`;
+                sql += `    D.idvisit,\n`;
+                sql += `    D.idvisitor,\n`;
+                sql += `    D.visitor_returning,\n`;
+                sql += `    D.config_device_type,\n`;
+                sql += `    COALESCE(M.pretty_name, D.campaign_name, D.referer_name, D.deduced_source) AS pretty_name,\n`;
+                sql += `    COALESCE(M.pretty_network, 'Unknown') AS pretty_network,\n`;
+                sql += `    COALESCE(M.outer_col, 9999) AS outer_col,\n`;
+                sql += `    COALESCE(M.inner_col, 9999) AS inner_col,\n`;
+                sql += `    D.visit_total_actions,\n`;
+                sql += `    D.visit_total_time\n`;
+                sql += `  FROM DeducedTraffic D\n`;
+                sql += `  LEFT JOIN MappingDictionary M\n`;
+                sql += `    ON D.deduced_source = M.deduced_source\n`;
+                sql += `    AND COALESCE(NULLIF(D.campaign_name, ''), '<empty>') = COALESCE(NULLIF(M.campaign_name, ''), '<empty>')\n`;
+                sql += `    AND COALESCE(NULLIF(D.campaign_source, ''), '<empty>') = COALESCE(NULLIF(M.campaign_source, ''), '<empty>')\n`;
+                sql += `    AND COALESCE(NULLIF(D.referer_name, ''), '<empty>') = COALESCE(NULLIF(M.referer_name, ''), '<empty>')\n`;
+                sql += `),\n`;
+            }
 
             sql += `Aggregated AS (\n`;
             sql += `  SELECT\n`;
