@@ -80,8 +80,28 @@ document.addEventListener('DOMContentLoaded', function() {
 
                 console.log(`Using Campaign Header: '${detectedCampaignHeader}', Source Header: '${detectedSourceHeader}'`);
 
-                // Process data using the original dataset
-                processCsvData(originalCsvData);
+                // --- SORTING ---
+                // Sort the data by source (primary) and campaign (secondary), case-insensitive
+                results.data.sort((a, b) => {
+                    const sourceA = (a[detectedSourceHeader] || '').toLowerCase();
+                    const sourceB = (b[detectedSourceHeader] || '').toLowerCase();
+                    const campaignA = (a[detectedCampaignHeader] || '').toLowerCase();
+                    const campaignB = (b[detectedCampaignHeader] || '').toLowerCase();
+
+                    if (sourceA < sourceB) return -1;
+                    if (sourceA > sourceB) return 1;
+
+                    // If sources are equal, sort by campaign
+                    if (campaignA < campaignB) return -1;
+                    if (campaignA > campaignB) return 1;
+
+                    return 0; // If both are equal
+                });
+                console.log("Sorted CSV Data:", results.data); // Log sorted data
+                // --- END SORTING ---
+
+                // Process data using the *sorted* dataset
+                processCsvData(results.data); // Use the sorted data now
                 uploadStatus.textContent = `Successfully loaded ${originalCsvData.length} rows from ${file.name}. Using '${detectedCampaignHeader}' and '${detectedSourceHeader}'.`;
                 mappingSection.style.display = 'block'; // Show table and SQL section
                 sqlOutput.value = ''; // Clear previous SQL output
