@@ -8,6 +8,9 @@ document.addEventListener('DOMContentLoaded', function() {
     const sqlOutput = document.getElementById('sqlOutput');
 
     let tableData = []; // To store the data currently in the table
+    let originalCsvData = []; // To store the original parsed data
+    let detectedCampaignHeader = null;
+    let detectedSourceHeader = null;
 
     // --- CSV Parsing ---
     csvFileInput.addEventListener('change', handleFileUpload);
@@ -40,19 +43,46 @@ document.addEventListener('DOMContentLoaded', function() {
                      return;
                 }
 
-                // Check for required headers
-                const headers = Object.keys(results.data[0]);
-                const requiredHeaders = ['campaign name', 'source'];
-                const missingHeaders = requiredHeaders.filter(h => !headers.includes(h));
+                originalCsvData = results.data; // Store original data
 
-                if (missingHeaders.length > 0) {
-                    uploadStatus.textContent = `Error: Missing required columns in CSV: ${missingHeaders.join(', ')}. Found: ${headers.join(', ')}`;
+                // --- Flexible Header Detection ---
+                // PapaParse provides headers in meta.fields when header:true
+                const headers = results.meta.fields;
+                if (!headers) {
+                     uploadStatus.textContent = 'Error: Could not detect headers in CSV.';
+                     mappingSection.style.display = 'none';
+                     return;
+                }
+                console.log("Detected Headers:", headers); // Log detected headers
+
+                const campaignHeaderPreferences = ["campaign name", "rt_campaign", "campaign"];
+                const sourceHeaderPreferences = ["source", "rt_source"];
+
+                // Find the first matching header based on preference order
+                detectedCampaignHeader = campaignHeaderPreferences.find(h => headers.includes(h));
+                detectedSourceHeader = sourceHeaderPreferences.find(h => headers.includes(h));
+
+                // Validate if headers were found
+                if (!detectedCampaignHeader) {
+                    uploadStatus.textContent = `Error: Could not find a suitable Campaign Name column. Looked for: ${campaignHeaderPreferences.join(', ')}. Found: ${headers.join(', ')}`;
                     mappingSection.style.display = 'none';
+                    detectedCampaignHeader = null; // Reset just in case
+                    detectedSourceHeader = null;
+                    return;
+                }
+                if (!detectedSourceHeader) {
+                    uploadStatus.textContent = `Error: Could not find a suitable Source column. Looked for: ${sourceHeaderPreferences.join(', ')}. Found: ${headers.join(', ')}`;
+                    mappingSection.style.display = 'none';
+                    detectedCampaignHeader = null; // Reset just in case
+                    detectedSourceHeader = null;
                     return;
                 }
 
-                processCsvData(results.data);
-                uploadStatus.textContent = `Successfully loaded ${results.data.length} rows from ${file.name}.`;
+                console.log(`Using Campaign Header: '${detectedCampaignHeader}', Source Header: '${detectedSourceHeader}'`);
+
+                // Process data using the original dataset
+                processCsvData(originalCsvData);
+                uploadStatus.textContent = `Successfully loaded ${originalCsvData.length} rows from ${file.name}. Using '${detectedCampaignHeader}' and '${detectedSourceHeader}'.`;
                 mappingSection.style.display = 'block'; // Show table and SQL section
                 sqlOutput.value = ''; // Clear previous SQL output
             },
@@ -66,11 +96,15 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // --- Table Population and Handling ---
     function processCsvData(data) {
+        // Map data for the table display and editing using detected headers
         tableData = data.map(row => ({
-            campaign_name: row['campaign name'] || '',
-            source: row['source'] || '',
-            pretty_name: row['campaign name'] || '', // Default pretty name to campaign name
-            network: row['source'] || '' // Default network to source
+            // Use detected headers for display/editing columns
+            campaign_name: row[detectedCampaignHeader] || '',
+            source: row[detectedSourceHeader] || '',
+            // Keep defaults based on detected headers for initial pretty_name/network
+            pretty_name: row[detectedCampaignHeader] || '',
+            network: row[detectedSourceHeader] || ''
+            // Original row data is kept in originalCsvData for SQL generation
         }));
         renderTable();
     }
@@ -132,31 +166,44 @@ document.addEventListener('DOMContentLoaded', function() {
     generateSqlBtn.addEventListener('click', generateSql);
 
     function generateSql() {
-        if (tableData.length === 0) {
-            sqlOutput.value = '-- No data loaded to generate SQL.';
+        // Check if original data exists and headers were detected
+        if (originalCsvData.length === 0 || !detectedCampaignHeader || !detectedSourceHeader) {
+            sqlOutput.value = '-- No data loaded or required headers not detected properly.';
             return;
         }
 
         const tableName = 'your_target_table'; // Placeholder table name
-        let sqlStatements = `-- Generated SQL for ${tableData.length} rows\n`;
+        let sqlStatements = `-- Generated SQL for ${originalCsvData.length} rows\n`;
+        sqlStatements += `-- Using Campaign Header: '${detectedCampaignHeader}', Source Header: '${detectedSourceHeader}'\n\n`;
 
-        tableData.forEach(row => {
-            // Basic SQL escaping (replace single quote with two single quotes)
-            const prettyNameEscaped = (row.pretty_name || '').replace(/'/g, "''");
-            const networkEscaped = (row.network || '').replace(/'/g, "''");
-            const campaignNameEscaped = (row.campaign_name || '').replace(/'/g, "''");
-            const sourceEscaped = (row.source || '').replace(/'/g, "''");
+        // Iterate through original data for WHERE clause, use tableData for SET clause
+        originalCsvData.forEach((originalRow, index) => {
+            const editedRow = tableData[index]; // Get corresponding potentially edited row from tableData
+
+            // Basic SQL escaping for values going into SET clause
+            const prettyNameEscaped = (editedRow.pretty_name || '').replace(/'/g, "''");
+            const networkEscaped = (editedRow.network || '').replace(/'/g, "''");
+
+            // Get original values using detected headers for the WHERE clause
+            const originalCampaignValue = originalRow[detectedCampaignHeader] || '';
+            const originalSourceValue = originalRow[detectedSourceHeader] || '';
+
+            // Escape original values for WHERE clause
+            const campaignValueEscaped = originalCampaignValue.replace(/'/g, "''");
+            const sourceValueEscaped = originalSourceValue.replace(/'/g, "''");
 
             // Only generate SQL if essential original identifiers are present
-            if (campaignNameEscaped && sourceEscaped) {
-                 sqlStatements += `UPDATE ${tableName} SET pretty_name = '${prettyNameEscaped}', network = '${networkEscaped}' WHERE campaign_name = '${campaignNameEscaped}' AND source = '${sourceEscaped}';\n`;
+            if (campaignValueEscaped && sourceValueEscaped) {
+                 // Use backticks (`) around header names in WHERE clause to handle spaces/special chars
+                 sqlStatements += `UPDATE ${tableName} SET pretty_name = '${prettyNameEscaped}', network = '${networkEscaped}' WHERE \`${detectedCampaignHeader}\` = '${campaignValueEscaped}' AND \`${detectedSourceHeader}\` = '${sourceValueEscaped}';\n`;
             } else {
-                 sqlStatements += `-- Skipping row: Missing campaign_name or source (Original: Campaign='${campaignNameEscaped}', Source='${sourceEscaped}')\n`;
+                 // Provide more context in the skip message
+                 sqlStatements += `-- Skipping row index ${index}: Missing original value for '${detectedCampaignHeader}' or '${detectedSourceHeader}' (Original Values: Campaign='${campaignValueEscaped}', Source='${sourceValueEscaped}')\n`;
             }
         });
 
         sqlOutput.value = sqlStatements;
-        console.log("Generated SQL.");
+        console.log("Generated SQL using detected headers.");
     }
 
     // --- Copy SQL ---
@@ -195,11 +242,11 @@ document.addEventListener('DOMContentLoaded', function() {
         // Ensure it's a string before replacing
         const safeString = String(unsafe);
         return safeString
-             .replace(/&/g, "&")
+             .replace(/&/g, "&") // Correctly escape ampersands first
              .replace(/</g, "<")
              .replace(/>/g, ">")
-             .replace(/"/g, "&quot;")
-             .replace(/'/g, "&#039;");
+             .replace(/"/g, "&amp;quot;") // Correctly escape double quotes
+             .replace(/'/g, "&#039;"); // Use HTML entity for single quote
     }
 
 });
