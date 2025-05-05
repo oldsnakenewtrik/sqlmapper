@@ -10,6 +10,10 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'spreadsheet.html'));
 });
+// Serve the simple mapper
+app.get('/simple', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'simple-mapper.html'));
+});
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
