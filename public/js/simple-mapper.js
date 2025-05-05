@@ -58,9 +58,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 console.log("Detected Headers:", headers); // Log detected headers
 
                 // Define header preferences
-                const campaignHeaderPreferences = ["campaign_name", "rt_campaign", "campaign"]; // "campaign_name" is preferred
+                const campaignHeaderPreferences = ["campaign_name", "rt_campaign", "campaign", "first_cpname"]; // "campaign_name" is preferred
                 const networkHeader = "network";
-                const sourceHeaderPreferences = ["source", "rt_source"];
+                const sourceHeaderPreferences = ["source", "rt_source", "first_source"];
 
                 // Reset state
                 detectedCampaignHeader = null;
