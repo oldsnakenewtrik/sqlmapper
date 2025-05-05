@@ -135,13 +135,14 @@ document.addEventListener('DOMContentLoaded', function() {
     function processCsvData(data) {
         // Map data for the table display and editing using detected headers
         tableData = data.map(row => ({
-            // Use detected headers for display/editing columns
-            campaign_name: row[detectedCampaignHeader] || '',
-            source: row[detectedSourceHeader] || '',
-            // Keep defaults based on detected headers for initial pretty_name/network
-            pretty_name: row[detectedCampaignHeader] || '',
-            network: row[detectedSourceHeader] || ''
-            // Original row data is kept in originalCsvData for SQL generation
+            // Store original values needed for WHERE clause
+            original_campaign_name: row[detectedCampaignHeader] || '',
+            original_source: row[detectedSourceHeader] || '',
+            // Values for display and editing (potentially modified)
+            campaign_name_display: row[detectedCampaignHeader] || '', // Keep original for display if needed, or remove if not shown
+            source_display: row[detectedSourceHeader] || '',         // Keep original for display if needed, or remove if not shown
+            pretty_name: row[detectedCampaignHeader] || '', // Default pretty_name to original campaign
+            network: row[detectedSourceHeader] || ''        // Default network to original source
         }));
         renderTable();
     }
@@ -153,8 +154,8 @@ document.addEventListener('DOMContentLoaded', function() {
             tr.dataset.index = index; // Store index for easy updates
 
             tr.innerHTML = `
-                <td>${escapeHtml(row.campaign_name)}</td>
-                <td>${escapeHtml(row.source)}</td>
+                <td>${escapeHtml(row.original_campaign_name)}</td> {/* Display original campaign */}
+                <td>${escapeHtml(row.original_source)}</td>      {/* Display original source */}
                 <td contenteditable="true" data-column="pretty_name">${escapeHtml(row.pretty_name)}</td>
                 <td contenteditable="true" data-column="network">${escapeHtml(row.network)}</td>
             `;
@@ -229,44 +230,43 @@ document.addEventListener('DOMContentLoaded', function() {
     generateSqlBtn.addEventListener('click', generateSql);
 
     function generateSql() {
-        // Check if original data exists and headers were detected
-        if (originalCsvData.length === 0 || !detectedCampaignHeader || !detectedSourceHeader) {
-            sqlOutput.value = '-- No data loaded or required headers not detected properly.';
+        // Check if table data exists and headers were detected
+        if (tableData.length === 0 || !detectedCampaignHeader || !detectedSourceHeader) {
+            sqlOutput.value = '-- No data loaded/processed or required headers not detected properly.';
             return;
         }
 
         const tableName = 'your_target_table'; // Placeholder table name
-        let sqlStatements = `-- Generated SQL for ${originalCsvData.length} rows\n`;
-        sqlStatements += `-- Using Campaign Header: '${detectedCampaignHeader}', Source Header: '${detectedSourceHeader}'\n\n`;
+        let sqlStatements = `-- Generated SQL for ${tableData.length} rows\n`;
+        sqlStatements += `-- Using Original Campaign Header: '${detectedCampaignHeader}', Original Source Header: '${detectedSourceHeader}' for WHERE clause\n\n`;
 
-        // Iterate through original data for WHERE clause, use tableData for SET clause
-        originalCsvData.forEach((originalRow, index) => {
-            const editedRow = tableData[index]; // Get corresponding potentially edited row from tableData
+        // Iterate through tableData which contains both original keys and potentially edited values
+        tableData.forEach((row, index) => {
+            // Basic SQL escaping for values going into SET clause (potentially edited)
+            const prettyNameEscaped = (row.pretty_name || '').replace(/'/g, "''");
+            const networkEscaped = (row.network || '').replace(/'/g, "''");
 
-            // Basic SQL escaping for values going into SET clause
-            const prettyNameEscaped = (editedRow.pretty_name || '').replace(/'/g, "''");
-            const networkEscaped = (editedRow.network || '').replace(/'/g, "''");
-
-            // Get original values using detected headers for the WHERE clause
-            const originalCampaignValue = originalRow[detectedCampaignHeader] || '';
-            const originalSourceValue = originalRow[detectedSourceHeader] || '';
+            // Get original values stored within the row object for the WHERE clause
+            const originalCampaignValue = row.original_campaign_name || '';
+            const originalSourceValue = row.original_source || '';
 
             // Escape original values for WHERE clause
             const campaignValueEscaped = originalCampaignValue.replace(/'/g, "''");
             const sourceValueEscaped = originalSourceValue.replace(/'/g, "''");
 
             // Only generate SQL if essential original identifiers are present
-            if (campaignValueEscaped && sourceValueEscaped) {
+            // Check the *original* values stored in the row object
+            if (originalCampaignValue && originalSourceValue) {
                  // Use backticks (`) around header names in WHERE clause to handle spaces/special chars
                  sqlStatements += `UPDATE ${tableName} SET pretty_name = '${prettyNameEscaped}', network = '${networkEscaped}' WHERE \`${detectedCampaignHeader}\` = '${campaignValueEscaped}' AND \`${detectedSourceHeader}\` = '${sourceValueEscaped}';\n`;
             } else {
-                 // Provide more context in the skip message
+                 // Provide more context in the skip message using original values
                  sqlStatements += `-- Skipping row index ${index}: Missing original value for '${detectedCampaignHeader}' or '${detectedSourceHeader}' (Original Values: Campaign='${campaignValueEscaped}', Source='${sourceValueEscaped}')\n`;
             }
         });
 
         sqlOutput.value = sqlStatements;
-        console.log("Generated SQL using detected headers.");
+        console.log("Generated SQL using processed table data.");
     }
 
     // --- Copy SQL ---
@@ -305,11 +305,11 @@ document.addEventListener('DOMContentLoaded', function() {
         // Ensure it's a string before replacing
         const safeString = String(unsafe);
         return safeString
-             .replace(/&/g, "&") // Correctly escape ampersands first
-             .replace(/</g, "<")
-             .replace(/>/g, ">")
-             .replace(/"/g, "&amp;quot;") // Correctly escape double quotes
-             .replace(/'/g, "&#039;"); // Use HTML entity for single quote
+             .replace(/&/g, "&") // Use & for ampersand
+             .replace(/</g, "<")  // Use < for less than
+             .replace(/>/g, ">")  // Use > for greater than
+             .replace(/"/g, '"') // Use " for double quote (using single quotes for the JS string)
+             .replace(/'/g, "&#039;"); // Use &#039; for single quote (or ')
     }
 
 });
