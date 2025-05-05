@@ -846,20 +846,32 @@
             // Update table headers based on data format
             const tableHeaders = document.querySelector('#campaignTable thead tr');
             if (tableHeaders) {
-                if (appState.dataFormat === 'redtrack' || appState.dataFormat === 'redtrack_new') {
+                if (appState.dataFormat === 'redtrack_new') {
+                    // Add RedTrack specific columns for new RedTrack format
+                    tableHeaders.innerHTML = `
+                        <th width="50">ID</th>
+                        <th>Source Type</th>
+                        <th>Original Name</th>
+                        <th>Original Network</th>
+                        <th id="deviceTypeHeader">Device Type</th>
+                        <th>RT Campaign</th>
+                        <th>RT Source</th>
+                        <th>Pretty Network</th>
+                        <th>Pretty Name</th>
+                        <th width="100">Actions</th>
+                    `;
+                } else if (appState.dataFormat === 'redtrack') {
                     // Add device type column for RedTrack format
-                    if (!document.getElementById('deviceTypeHeader')) {
-                        tableHeaders.innerHTML = `
-                            <th width="50">ID</th>
-                            <th>Source Type</th>
-                            <th>Original Name</th>
-                            <th>Original Network</th>
-                            <th id="deviceTypeHeader">Device Type</th>
-                            <th>Pretty Network</th>
-                            <th>Pretty Name</th>
-                            <th width="100">Actions</th>
-                        `;
-                    }
+                    tableHeaders.innerHTML = `
+                        <th width="50">ID</th>
+                        <th>Source Type</th>
+                        <th>Original Name</th>
+                        <th>Original Network</th>
+                        <th id="deviceTypeHeader">Device Type</th>
+                        <th>Pretty Network</th>
+                        <th>Pretty Name</th>
+                        <th width="100">Actions</th>
+                    `;
                 } else {
                     // Standard Matomo format
                     tableHeaders.innerHTML = `
@@ -885,8 +897,55 @@
                     row.classList.add('unmapped');
                 }
 
-                if (appState.dataFormat === 'redtrack' || appState.dataFormat === 'redtrack_new') {
-                    // RedTrack format with device type
+                if (appState.dataFormat === 'redtrack_new') {
+                    // New RedTrack format with RT Campaign and RT Source
+                    row.innerHTML = `
+                        <td>${mapping.id + 1}</td>
+                        <td>${mapping.source}</td>
+                        <td>${mapping.originalName}
+                            <button class="btn btn-sm btn-outline-secondary copy-to-pretty-btn"
+                                    data-id="${mapping.id}" data-field="originalName" data-target="prettyName">
+                                ↓
+                            </button>
+                        </td>
+                        <td>${mapping.originalNetwork}
+                            <button class="btn btn-sm btn-outline-secondary copy-to-pretty-btn"
+                                    data-id="${mapping.id}" data-field="originalNetwork" data-target="prettyNetwork">
+                                ↓
+                            </button>
+                        </td>
+                        <td>${mapping.deviceType || ''}</td>
+                        <td>${mapping.rtCampaign || ''}
+                            <button class="btn btn-sm btn-outline-secondary copy-to-pretty-btn"
+                                    data-id="${mapping.id}" data-field="rtCampaign" data-target="prettyName">
+                                ↓
+                            </button>
+                        </td>
+                        <td>${mapping.rtSource || ''}
+                            <button class="btn btn-sm btn-outline-secondary copy-to-pretty-btn"
+                                    data-id="${mapping.id}" data-field="rtSource" data-target="prettyNetwork">
+                                ↓
+                            </button>
+                        </td>
+                        <td>
+                            <input type="text" class="form-control network-input" value="${mapping.prettyNetwork}"
+                                   data-id="${mapping.id}" data-field="prettyNetwork">
+                        </td>
+                        <td>
+                            <input type="text" class="form-control name-input" value="${mapping.prettyName}"
+                                   data-id="${mapping.id}" data-field="prettyName">
+                        </td>
+                        <td class="text-center">
+                            <button class="btn btn-sm btn-outline-secondary copy-network-btn" data-id="${mapping.id}">
+                                Copy Net
+                            </button>
+                            <button class="btn btn-sm btn-outline-secondary copy-campaign-btn" data-id="${mapping.id}">
+                                Copy Camp
+                            </button>
+                        </td>
+                    `;
+                } else if (appState.dataFormat === 'redtrack') {
+                    // Original RedTrack format with device type
                     row.innerHTML = `
                         <td>${mapping.id + 1}</td>
                         <td>${mapping.source}</td>
@@ -1116,7 +1175,7 @@
                 const searchText = appState.filters.text.toLowerCase();
                 let textMatch = false;
 
-                if (appState.dataFormat === 'redtrack' || appState.dataFormat === 'redtrack_new') {
+                if (appState.dataFormat === 'redtrack_new') {
                     textMatch =
                         (mapping.source || '').toLowerCase().includes(searchText) ||
                         (mapping.originalName || '').toLowerCase().includes(searchText) ||
@@ -1124,10 +1183,19 @@
                         (mapping.prettyNetwork || '').toLowerCase().includes(searchText) ||
                         (mapping.prettyName || '').toLowerCase().includes(searchText) ||
                         (mapping.deviceType || '').toLowerCase().includes(searchText) ||
-                        (mapping.utmCampaign || '').toLowerCase().includes(searchText) ||
                         (mapping.rtSource || '').toLowerCase().includes(searchText) ||
                         (mapping.rtCampaign || '').toLowerCase().includes(searchText) ||
-                        (mapping.rtMedium || '').toLowerCase().includes(searchText);
+                        (mapping.rtMedium || '').toLowerCase().includes(searchText) ||
+                        (mapping.clickId || '').toLowerCase().includes(searchText);
+                } else if (appState.dataFormat === 'redtrack') {
+                    textMatch =
+                        (mapping.source || '').toLowerCase().includes(searchText) ||
+                        (mapping.originalName || '').toLowerCase().includes(searchText) ||
+                        (mapping.originalNetwork || '').toLowerCase().includes(searchText) ||
+                        (mapping.prettyNetwork || '').toLowerCase().includes(searchText) ||
+                        (mapping.prettyName || '').toLowerCase().includes(searchText) ||
+                        (mapping.deviceType || '').toLowerCase().includes(searchText) ||
+                        (mapping.utmCampaign || '').toLowerCase().includes(searchText);
                 } else {
                     textMatch =
                         (mapping.source || '').toLowerCase().includes(searchText) ||

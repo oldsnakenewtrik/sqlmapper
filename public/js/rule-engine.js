@@ -72,9 +72,9 @@ const RuleEngine = {
             setPrettyName: (row) => `Search: ${row.originalName || 'Unknown'}`
         },
 
-        // Rule 8: RedTrack Campaigns
+        // Rule 8: RedTrack Campaigns with pipe separator
         {
-            name: "RedTrack Campaigns",
+            name: "RedTrack Campaigns with Pipe",
             condition: (row) => row.rtCampaign && row.rtCampaign.includes(' | '),
             setPrettyNetwork: (row) => {
                 const parts = row.rtCampaign.split(' | ');
@@ -84,6 +84,20 @@ const RuleEngine = {
                 const parts = row.rtCampaign.split(' | ');
                 return parts.length > 1 ? parts[1] : row.originalName;
             }
+        },
+
+        // Rule 9: Use RT Source for Network
+        {
+            name: "RT Source for Network",
+            condition: (row) => row.rtSource && !row.prettyNetwork,
+            setPrettyNetwork: (row) => row.rtSource
+        },
+
+        // Rule 10: Use RT Campaign for Name
+        {
+            name: "RT Campaign for Name",
+            condition: (row) => row.rtCampaign && !row.prettyName,
+            setPrettyName: (row) => row.rtCampaign
         }
     ],
 
@@ -106,7 +120,18 @@ const RuleEngine = {
             'sa360': 'Google Ads',
             'stackadapt': 'Display Ads',
             'organic / direct / no referrer': 'Direct/Internal',
-            'organic search': 'Organic Search'
+            'organic search': 'Organic Search',
+            'google ads': 'Google Ads',
+            'google_ads': 'Google Ads',
+            'facebook_ads': 'Social Media',
+            'facebook ads': 'Social Media',
+            'meta': 'Social Media',
+            'meta ads': 'Social Media',
+            'meta_ads': 'Social Media',
+            'bing ads': 'Microsoft Ads',
+            'bing_ads': 'Microsoft Ads',
+            'microsoft ads': 'Microsoft Ads',
+            'microsoft_ads': 'Microsoft Ads'
         }
     },
 
