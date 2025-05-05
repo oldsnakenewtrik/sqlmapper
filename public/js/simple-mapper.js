@@ -80,8 +80,25 @@ document.addEventListener('DOMContentLoaded', function() {
 
                 console.log(`Using Campaign Header: '${detectedCampaignHeader}', Source Header: '${detectedSourceHeader}'`);
 
+                // --- FILTERING ---
+                // Filter out rows where both source and campaign are effectively empty
+                const originalRowCount = results.data.length;
+                results.data = results.data.filter(row => {
+                    const sourceValue = row[detectedSourceHeader];
+                    const campaignValue = row[detectedCampaignHeader];
+                    // Keep row if EITHER source OR campaign has a non-empty value (treat null/undefined/empty string as empty)
+                    const isSourceEmpty = sourceValue === null || sourceValue === undefined || String(sourceValue).trim() === '';
+                    const isCampaignEmpty = campaignValue === null || campaignValue === undefined || String(campaignValue).trim() === '';
+                    return !(isSourceEmpty && isCampaignEmpty); // Keep if NOT (both are empty)
+                });
+                const filteredRowCount = results.data.length;
+                if (originalRowCount !== filteredRowCount) {
+                    console.log(`Filtered out ${originalRowCount - filteredRowCount} rows with empty source and campaign.`);
+                }
+                // --- END FILTERING ---
+ 
                 // --- SORTING ---
-                // Sort the data by source (primary) and campaign (secondary), case-insensitive
+                // Sort the *filtered* data by source (primary) and campaign (secondary), case-insensitive
                 results.data.sort((a, b) => {
                     const sourceA = (a[detectedSourceHeader] || '').toLowerCase();
                     const sourceB = (b[detectedSourceHeader] || '').toLowerCase();
