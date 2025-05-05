@@ -168,11 +168,12 @@ document.addEventListener('DOMContentLoaded', function() {
     function addEditableListeners() {
         const editableCells = campaignTableBody.querySelectorAll('td[contenteditable="true"]');
         editableCells.forEach(cell => {
-            cell.addEventListener('blur', handleCellEdit); // Save on blur
+            cell.addEventListener('blur', handleCellEdit); // Save on blur (might be redundant now if paste/enter handle it)
             cell.addEventListener('keydown', (e) => {
                 if (e.key === 'Enter') {
                     e.preventDefault(); // Prevent adding newline
-                    e.target.blur();    // Trigger save
+                    handleCellEdit({ target: e.target, type: 'keydown.enter' }); // Explicitly save content
+                    e.target.blur();    // Then blur
                 } else if (e.key === 'Escape') {
                     // Revert content before blurring
                     const originalValue = tableData[e.target.closest('tr').dataset.index][e.target.dataset.column];
@@ -180,19 +181,44 @@ document.addEventListener('DOMContentLoaded', function() {
                     e.target.blur();
                 }
             });
+            // Explicitly handle paste to ensure data model updates
+            cell.addEventListener('paste', (e) => {
+                // We explicitly DO NOT call e.preventDefault() here.
+                console.log('Paste event allowed.');
+                // Use setTimeout to allow the paste action to complete and update the DOM
+                // before we read the value and update our data model.
+                const targetCell = e.target;
+                setTimeout(() => {
+                    // Pass a custom event object indicating the trigger
+                    handleCellEdit({ target: targetCell, type: 'paste.timeout' });
+                }, 0);
+            });
         });
     }
 
     function handleCellEdit(event) {
         const cell = event.target;
+        const eventType = event.type || 'unknown'; // Get event type if available
+
+        // Robustness check: Ensure cell and necessary properties exist
+        if (!cell || !cell.closest || !cell.closest('tr') || !cell.closest('tr').dataset || typeof cell.closest('tr').dataset.index === 'undefined' || !cell.dataset || typeof cell.dataset.column === 'undefined') {
+            console.warn(`handleCellEdit (${eventType}) triggered on invalid target:`, event.target);
+            return; // Exit if the target isn't a valid cell we expect
+        }
         const rowIndex = cell.closest('tr').dataset.index;
         const column = cell.dataset.column;
-        const newValue = cell.textContent.trim(); // Get edited value
+        const newValue = cell.textContent.trim(); // Get potentially pasted/edited value
 
-        // Update the in-memory data store
-        if (tableData[rowIndex] && tableData[rowIndex][column] !== newValue) {
+        // Validate rowIndex
+        if (typeof tableData[rowIndex] === 'undefined') {
+             console.warn(`handleCellEdit (${eventType}): Invalid rowIndex ${rowIndex}. Table data length: ${tableData.length}`);
+             return; // Exit if rowIndex is out of bounds
+        }
+
+        // Update the in-memory data store if the value has actually changed
+        if (tableData[rowIndex][column] !== newValue) {
             tableData[rowIndex][column] = newValue;
-            console.log(`Updated row ${rowIndex}, column ${column} to: ${newValue}`);
+            console.log(`Updated row ${rowIndex}, column ${column} to: ${newValue} (Trigger: ${eventType})`);
             // Optional: Add visual feedback like a temporary highlight
             cell.style.backgroundColor = '#d4edda'; // Light green flash
             setTimeout(() => { cell.style.backgroundColor = ''; }, 500);
