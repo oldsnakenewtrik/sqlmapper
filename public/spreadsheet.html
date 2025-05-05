@@ -534,24 +534,53 @@
                 console.log('Format auto-detected as Matomo based on filename');
             }
 
-            Papa.parse(file, {
-                header: true,
-                complete: function(results) {
-                    if (results.errors.length > 0) {
-                        elements.uploadStatus.innerHTML = `<div class="alert alert-danger">Error parsing CSV: ${results.errors[0].message}</div>`;
-                        return;
-                    }
+            // First, try to detect the delimiter by reading the first few lines
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const sample = e.target.result.slice(0, 2000); // Get first 2000 chars for detection
 
-                    // Process the data
-                    appState.csvData = results.data;
+                // Try to detect the delimiter
+                let delimiter = ','; // Default delimiter
+
+                // Check if the file might be using tabs
+                if (sample.includes('\t')) {
+                    delimiter = '\t';
+                    console.log('Detected tab delimiter');
+                }
+
+                // Check for semicolons (common in European CSV)
+                else if (sample.includes(';') && !sample.includes(',')) {
+                    delimiter = ';';
+                    console.log('Detected semicolon delimiter');
+                }
+
+                // Now parse with the detected delimiter
+                Papa.parse(file, {
+                    header: true,
+                    delimiter: delimiter,
+                    skipEmptyLines: true,
+                    error: function(error) {
+                        console.error('Parsing error:', error);
+                        elements.uploadStatus.innerHTML = `<div class="alert alert-danger">Error parsing CSV: ${error.message}</div>`;
+                    },
+                    complete: function(results) {
+                        if (results.errors.length > 0) {
+                            console.error('Parse errors:', results.errors);
+                            elements.uploadStatus.innerHTML = `<div class="alert alert-danger">Error parsing CSV: ${results.errors[0].message}. Tried using delimiter: "${delimiter}"</div>`;
+                            return;
+                        }
+
+                        // Process the data
+                        appState.csvData = results.data;
 
                     // Auto-detect format based on headers
                     if (results.meta.fields) {
                         const headers = results.meta.fields;
 
-                        // Check for RedTrack format with click_id, campaign, source, rt_campaign fields
-                        if (headers.includes('click_id') && headers.includes('campaign') &&
-                            headers.includes('source') && headers.includes('rt_campaign')) {
+                        console.log('CSV Headers:', headers);
+
+                        // Check for RedTrack format with click_id field (new format)
+                        if (headers.includes('click_id')) {
                             appState.dataFormat = 'redtrack_new';
                             elements.formatRedTrack.checked = true;
                             elements.formatMatomo.checked = false;
@@ -578,15 +607,19 @@
                         }
                     }
 
-                    elements.uploadStatus.innerHTML = `<div class="alert alert-success">File loaded successfully! ${appState.csvData.length} rows found. Format detected: ${appState.dataFormat}</div>`;
+                    elements.uploadStatus.innerHTML = `<div class="alert alert-success">File loaded successfully! ${appState.csvData.length} rows found. Format detected: ${appState.dataFormat} (Delimiter: ${delimiter})</div>`;
 
                     // Initialize mappings
                     initializeMappings(elements);
 
                     // Show mapping section
                     elements.mappingSection.style.display = 'block';
-                }
-            });
+                    }
+                });
+            };
+
+            // Start the process by reading the file
+            reader.readAsText(file);
         }
 
         // Load sample data
@@ -597,17 +630,35 @@
             fetch('sample-data.csv')
                 .then(response => response.text())
                 .then(csvText => {
+                    // Try to detect the delimiter from the sample data
+                    const sample = csvText.slice(0, 2000); // Get first 2000 chars for detection
+                    let delimiter = ','; // Default delimiter
+
+                    // Check if the file might be using tabs
+                    if (sample.includes('\t')) {
+                        delimiter = '\t';
+                        console.log('Detected tab delimiter in sample data');
+                    }
+                    // Check for semicolons (common in European CSV)
+                    else if (sample.includes(';') && !sample.includes(',')) {
+                        delimiter = ';';
+                        console.log('Detected semicolon delimiter in sample data');
+                    }
+
                     Papa.parse(csvText, {
                         header: true,
+                        delimiter: delimiter,
+                        skipEmptyLines: true,
                         complete: function(results) {
                             if (results.errors.length > 0) {
-                                elements.uploadStatus.innerHTML = `<div class="alert alert-danger">Error parsing CSV: ${results.errors[0].message}</div>`;
+                                console.error('Parse errors:', results.errors);
+                                elements.uploadStatus.innerHTML = `<div class="alert alert-danger">Error parsing CSV: ${results.errors[0].message}. Tried using delimiter: "${delimiter}"</div>`;
                                 return;
                             }
 
                             // Process the data
                             appState.csvData = results.data;
-                            elements.uploadStatus.innerHTML = `<div class="alert alert-success">Sample data loaded successfully! ${appState.csvData.length} rows found.</div>`;
+                            elements.uploadStatus.innerHTML = `<div class="alert alert-success">Sample data loaded successfully! ${appState.csvData.length} rows found. (Delimiter: ${delimiter})</div>`;
 
                             // Initialize mappings
                             initializeMappings(elements);
@@ -701,8 +752,14 @@
                     let key;
                     let entry;
 
-                    // For new RedTrack format, use source + campaign + device as key
-                    const deviceType = row.device || '';
+                    // For new RedTrack format, extract all possible fields
+                    // Log the first row to see what fields are available
+                    if (index === 0) {
+                        console.log('RedTrack New Format Sample Row:', row);
+                    }
+
+                    // Extract fields with fallbacks
+                    const deviceType = row.device || row.device_type || '';
                     const campaignName = row.campaign || '';
                     const source = row.source || '';
                     const network = row.network || '';
@@ -710,8 +767,8 @@
                     const rtCampaign = row.rt_campaign || '';
                     const rtMedium = row.rt_medium || '';
 
-                    // Create a unique key
-                    key = `${source || ''}-${campaignName || ''}-${deviceType || ''}`;
+                    // Create a unique key - try to make it as unique as possible
+                    key = `${source || ''}-${campaignName || ''}-${deviceType || ''}-${rtCampaign || ''}`;
 
                     // Determine the best values for mapping
                     const bestSource = source || rtSource || '';
