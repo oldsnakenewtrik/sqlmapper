@@ -11,6 +11,8 @@ document.addEventListener('DOMContentLoaded', function() {
     let originalCsvData = []; // To store the original parsed data
     let detectedCampaignHeader = null;
     let detectedSourceHeader = null;
+    let detectedNetworkHeader = null; // Added for the new format
+    let isNetworkFormat = false; // Flag to indicate which format is detected
 
     // --- CSV Parsing ---
     csvFileInput.addEventListener('change', handleFileUpload);
@@ -55,71 +57,127 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
                 console.log("Detected Headers:", headers); // Log detected headers
 
-                const campaignHeaderPreferences = ["campaign name", "rt_campaign", "campaign"];
+                // Define header preferences
+                const campaignHeaderPreferences = ["campaign_name", "rt_campaign", "campaign"]; // "campaign_name" is preferred
+                const networkHeader = "network";
                 const sourceHeaderPreferences = ["source", "rt_source"];
 
-                // Find the first matching header based on preference order
+                // Reset state
+                detectedCampaignHeader = null;
+                detectedSourceHeader = null;
+                detectedNetworkHeader = null;
+                isNetworkFormat = false;
+
+                // 1. Detect Campaign Header
                 detectedCampaignHeader = campaignHeaderPreferences.find(h => headers.includes(h));
-                detectedSourceHeader = sourceHeaderPreferences.find(h => headers.includes(h));
 
-                // Validate if headers were found
+                // 2. Detect Network or Source Header
+                if (headers.includes(networkHeader)) {
+                    detectedNetworkHeader = networkHeader;
+                    isNetworkFormat = true;
+                    console.log("Detected 'network' header. Using Network format.");
+                } else {
+                    detectedSourceHeader = sourceHeaderPreferences.find(h => headers.includes(h));
+                    isNetworkFormat = false;
+                    console.log("Did not find 'network' header. Looking for Source format.");
+                }
+
+                // 3. Validate Headers
+                let errorMessage = '';
                 if (!detectedCampaignHeader) {
-                    uploadStatus.textContent = `Error: Could not find a suitable Campaign Name column. Looked for: ${campaignHeaderPreferences.join(', ')}. Found: ${headers.join(', ')}`;
-                    mappingSection.style.display = 'none';
-                    detectedCampaignHeader = null; // Reset just in case
-                    detectedSourceHeader = null;
-                    return;
+                    errorMessage = `Error: Could not find a suitable Campaign column. Looked for: ${campaignHeaderPreferences.join(', ')}. Found: ${headers.join(', ')}`;
+                } else if (!isNetworkFormat && !detectedSourceHeader) {
+                    errorMessage = `Error: Could not find a suitable Network or Source column. Looked for: '${networkHeader}' or ${sourceHeaderPreferences.join(', ')}. Found: ${headers.join(', ')}`;
+                } else if (isNetworkFormat && !detectedNetworkHeader) {
+                    // This case should technically not happen based on the logic above, but good for robustness
+                     errorMessage = `Error: Found campaign header '${detectedCampaignHeader}' but failed to confirm network header '${networkHeader}'. Found: ${headers.join(', ')}`;
                 }
-                if (!detectedSourceHeader) {
-                    uploadStatus.textContent = `Error: Could not find a suitable Source column. Looked for: ${sourceHeaderPreferences.join(', ')}. Found: ${headers.join(', ')}`;
+
+                if (errorMessage) {
+                    uploadStatus.textContent = errorMessage;
                     mappingSection.style.display = 'none';
-                    detectedCampaignHeader = null; // Reset just in case
+                    // Reset all detected headers on error
+                    detectedCampaignHeader = null;
                     detectedSourceHeader = null;
+                    detectedNetworkHeader = null;
+                    isNetworkFormat = false;
                     return;
                 }
 
-                console.log(`Using Campaign Header: '${detectedCampaignHeader}', Source Header: '${detectedSourceHeader}'`);
+                // Log detected headers based on format
+                if (isNetworkFormat) {
+                    console.log(`Using Network Format - Campaign Header: '${detectedCampaignHeader}', Network Header: '${detectedNetworkHeader}'`);
+                } else {
+                    console.log(`Using Source Format - Campaign Header: '${detectedCampaignHeader}', Source Header: '${detectedSourceHeader}'`);
+                }
 
-                // --- FILTERING ---
-                // Filter out rows where both source and campaign are effectively empty
+
+                // --- FILTERING (Adapts based on format) ---
                 const originalRowCount = results.data.length;
-                results.data = results.data.filter(row => {
-                    const sourceValue = row[detectedSourceHeader];
-                    const campaignValue = row[detectedCampaignHeader];
-                    // Keep row if EITHER source OR campaign has a non-empty value (treat null/undefined/empty string as empty)
-                    const isSourceEmpty = sourceValue === null || sourceValue === undefined || String(sourceValue).trim() === '';
-                    const isCampaignEmpty = campaignValue === null || campaignValue === undefined || String(campaignValue).trim() === '';
-                    return !(isSourceEmpty && isCampaignEmpty); // Keep if NOT (both are empty)
-                });
-                const filteredRowCount = results.data.length;
-                if (originalRowCount !== filteredRowCount) {
-                    console.log(`Filtered out ${originalRowCount - filteredRowCount} rows with empty source and campaign.`);
+                let filteredData;
+
+                if (isNetworkFormat) {
+                    // Network Format: Filter rows where campaign_name is empty
+                    filteredData = results.data.filter(row => {
+                        const campaignValue = row[detectedCampaignHeader];
+                        const isCampaignEmpty = campaignValue === null || campaignValue === undefined || String(campaignValue).trim() === '';
+                        return !isCampaignEmpty; // Keep if campaign is NOT empty
+                    });
+                    const filteredRowCount = filteredData.length;
+                    if (originalRowCount !== filteredRowCount) {
+                        console.log(`Filtered out ${originalRowCount - filteredRowCount} rows with empty '${detectedCampaignHeader}'.`);
+                    }
+                } else {
+                    // Source Format: Filter rows where both source and campaign are empty (existing logic)
+                    filteredData = results.data.filter(row => {
+                        const sourceValue = row[detectedSourceHeader];
+                        const campaignValue = row[detectedCampaignHeader];
+                        const isSourceEmpty = sourceValue === null || sourceValue === undefined || String(sourceValue).trim() === '';
+                        const isCampaignEmpty = campaignValue === null || campaignValue === undefined || String(campaignValue).trim() === '';
+                        return !(isSourceEmpty && isCampaignEmpty); // Keep if NOT (both are empty)
+                    });
+                    const filteredRowCount = filteredData.length;
+                    if (originalRowCount !== filteredRowCount) {
+                        console.log(`Filtered out ${originalRowCount - filteredRowCount} rows with empty '${detectedSourceHeader}' and '${detectedCampaignHeader}'.`);
+                    }
                 }
                 // --- END FILTERING ---
- 
-                // --- SORTING ---
-                // Sort the *filtered* data by source (primary) and campaign (secondary), case-insensitive
-                results.data.sort((a, b) => {
-                    const sourceA = (a[detectedSourceHeader] || '').toLowerCase();
-                    const sourceB = (b[detectedSourceHeader] || '').toLowerCase();
-                    const campaignA = (a[detectedCampaignHeader] || '').toLowerCase();
-                    const campaignB = (b[detectedCampaignHeader] || '').toLowerCase();
 
-                    if (sourceA < sourceB) return -1;
-                    if (sourceA > sourceB) return 1;
+                // --- SORTING (Adapts based on format) ---
+                if (isNetworkFormat) {
+                    // Network Format: Sort by campaign_name only
+                    filteredData.sort((a, b) => {
+                        const campaignA = (a[detectedCampaignHeader] || '').toLowerCase();
+                        const campaignB = (b[detectedCampaignHeader] || '').toLowerCase();
+                        if (campaignA < campaignB) return -1;
+                        if (campaignA > campaignB) return 1;
+                        return 0;
+                    });
+                    console.log(`Sorted CSV Data by '${detectedCampaignHeader}':`, filteredData);
+                } else {
+                    // Source Format: Sort by source (primary) and campaign (secondary)
+                    filteredData.sort((a, b) => {
+                        const sourceA = (a[detectedSourceHeader] || '').toLowerCase();
+                        const sourceB = (b[detectedSourceHeader] || '').toLowerCase();
+                        const campaignA = (a[detectedCampaignHeader] || '').toLowerCase();
+                        const campaignB = (b[detectedCampaignHeader] || '').toLowerCase();
 
-                    // If sources are equal, sort by campaign
-                    if (campaignA < campaignB) return -1;
-                    if (campaignA > campaignB) return 1;
+                        if (sourceA < sourceB) return -1;
+                        if (sourceA > sourceB) return 1;
+                        if (campaignA < campaignB) return -1;
+                        if (campaignA > campaignB) return 1;
+                        return 0;
+                    });
+                    console.log(`Sorted CSV Data by '${detectedSourceHeader}' then '${detectedCampaignHeader}':`, filteredData);
+                }
+                 // --- END SORTING ---
 
-                    return 0; // If both are equal
-                });
-                console.log("Sorted CSV Data:", results.data); // Log sorted data
-                // --- END SORTING ---
-
-                // Process data using the *sorted* dataset
-                processCsvData(results.data); // Use the sorted data now
-                uploadStatus.textContent = `Successfully loaded ${originalCsvData.length} rows from ${file.name}. Using '${detectedCampaignHeader}' and '${detectedSourceHeader}'.`;
+                // Process data using the *filtered and sorted* dataset
+                processCsvData(filteredData); // Use the processed data
+                const headerMessage = isNetworkFormat
+                    ? `Using Network Format ('${detectedCampaignHeader}', '${detectedNetworkHeader}')`
+                    : `Using Source Format ('${detectedCampaignHeader}', '${detectedSourceHeader}')`;
+                uploadStatus.textContent = `Successfully loaded ${originalRowCount} rows (filtered to ${filteredData.length}) from ${file.name}. ${headerMessage}.`;
                 mappingSection.style.display = 'block'; // Show table and SQL section
                 sqlOutput.value = ''; // Clear previous SQL output
             },
@@ -133,17 +191,32 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // --- Table Population and Handling ---
     function processCsvData(data) {
-        // Map data for the table display and editing using detected headers
-        tableData = data.map(row => ({
-            // Store original values needed for WHERE clause
-            original_campaign_name: row[detectedCampaignHeader] || '',
-            original_source: row[detectedSourceHeader] || '',
-            // Values for display and editing (potentially modified)
-            campaign_name_display: row[detectedCampaignHeader] || '', // Keep original for display if needed, or remove if not shown
-            source_display: row[detectedSourceHeader] || '',         // Keep original for display if needed, or remove if not shown
-            pretty_name: row[detectedCampaignHeader] || '', // Default pretty_name to original campaign
-            network: row[detectedSourceHeader] || ''        // Default network to original source
-        }));
+        // Map data for the table display and editing, adapting based on format
+        tableData = data.map(row => {
+            const campaignValue = row[detectedCampaignHeader] || '';
+            let sourceValue = '';
+            let networkValue = '';
+
+            if (isNetworkFormat) {
+                networkValue = row[detectedNetworkHeader] || '';
+                return {
+                    original_campaign_name: campaignValue,
+                    original_source: null, // No original source in this format
+                    original_network: networkValue, // Store original network
+                    pretty_name: campaignValue, // Default pretty_name to original campaign
+                    network: networkValue // Default editable network to original network
+                };
+            } else {
+                sourceValue = row[detectedSourceHeader] || '';
+                return {
+                    original_campaign_name: campaignValue,
+                    original_source: sourceValue, // Store original source
+                    original_network: null, // No original network in this format
+                    pretty_name: campaignValue, // Default pretty_name to original campaign
+                    network: sourceValue // Default editable network to original source (as before)
+                };
+            }
+        });
         renderTable();
     }
 
@@ -154,11 +227,15 @@ document.addEventListener('DOMContentLoaded', function() {
             tr.dataset.index = index; // Store index for easy updates
 
             tr.innerHTML = `
-                <td>${escapeHtml(row.original_campaign_name)}</td> {/* Display original campaign */}
-                <td>${escapeHtml(row.original_source)}</td>      {/* Display original source */}
+                <td>${escapeHtml(row.original_campaign_name)}</td>
+                <td>${escapeHtml(isNetworkFormat ? row.original_network : row.original_source)}</td> {/* Display original network OR source */}
                 <td contenteditable="true" data-column="pretty_name">${escapeHtml(row.pretty_name)}</td>
                 <td contenteditable="true" data-column="network">${escapeHtml(row.network)}</td>
             `;
+            // Add appropriate headers dynamically? For now, keep static headers in HTML
+            // Or update table headers here if needed:
+            // document.getElementById('originalSourceHeaderCell').textContent = isNetworkFormat ? 'Original Network' : 'Original Source';
+
             campaignTableBody.appendChild(tr);
         });
 
@@ -230,15 +307,20 @@ document.addEventListener('DOMContentLoaded', function() {
     generateSqlBtn.addEventListener('click', generateSql);
 
     function generateSql() {
-        // Check if table data exists and headers were detected
-        if (tableData.length === 0 || !detectedCampaignHeader || !detectedSourceHeader) {
-            sqlOutput.value = '-- No data loaded/processed or required headers not detected properly.';
-            return;
+        // Check if table data exists and required headers were detected for the identified format
+        if (tableData.length === 0 || !detectedCampaignHeader || (!isNetworkFormat && !detectedSourceHeader) || (isNetworkFormat && !detectedNetworkHeader)) {
+             sqlOutput.value = '-- No data loaded/processed or required headers not detected properly for the identified format.';
+             return;
         }
 
         const tableName = 'your_target_table'; // Placeholder table name
         let sqlStatements = `-- Generated SQL for ${tableData.length} rows\n`;
-        sqlStatements += `-- Using Original Campaign Header: '${detectedCampaignHeader}', Original Source Header: '${detectedSourceHeader}' for WHERE clause\n\n`;
+        if (isNetworkFormat) {
+            sqlStatements += `-- Format: Network (Using Original Campaign Header: '${detectedCampaignHeader}' for WHERE clause)\n\n`;
+        } else {
+            sqlStatements += `-- Format: Source (Using Original Campaign Header: '${detectedCampaignHeader}', Original Source Header: '${detectedSourceHeader}' for WHERE clause)\n\n`;
+        }
+
 
         // Iterate through tableData which contains both original keys and potentially edited values
         tableData.forEach((row, index) => {
@@ -247,21 +329,44 @@ document.addEventListener('DOMContentLoaded', function() {
             const networkEscaped = (row.network || '').replace(/'/g, "''");
 
             // Get original values stored within the row object for the WHERE clause
-            const originalCampaignValue = row.original_campaign_name || '';
-            const originalSourceValue = row.original_source || '';
+            const originalCampaignValue = row.original_campaign_name || ''; // Always needed
+            const originalSourceValue = row.original_source || ''; // Only relevant for source format
+            // original_network is not directly used in WHERE, only original_campaign_name is used for network format
 
-            // Escape original values for WHERE clause
+            // Escape original campaign value for WHERE clause
             const campaignValueEscaped = originalCampaignValue.replace(/'/g, "''");
-            const sourceValueEscaped = originalSourceValue.replace(/'/g, "''");
 
-            // Only generate SQL if essential original identifiers are present
-            // Check the *original* values stored in the row object
-            if (originalCampaignValue && originalSourceValue) {
-                 // Use backticks (`) around header names in WHERE clause to handle spaces/special chars
-                 sqlStatements += `UPDATE ${tableName} SET pretty_name = '${prettyNameEscaped}', network = '${networkEscaped}' WHERE \`${detectedCampaignHeader}\` = '${campaignValueEscaped}' AND \`${detectedSourceHeader}\` = '${sourceValueEscaped}';\n`;
+            let whereClause = '';
+            let canGenerate = false;
+            let skipReason = '';
+
+            if (isNetworkFormat) {
+                // Network Format: WHERE clause uses only original campaign
+                if (originalCampaignValue) {
+                    // Use backticks (`) around header names in WHERE clause
+                    whereClause = `WHERE \`${detectedCampaignHeader}\` = '${campaignValueEscaped}'`;
+                    canGenerate = true;
+                } else {
+                    skipReason = `Missing original value for '${detectedCampaignHeader}'`;
+                }
             } else {
-                 // Provide more context in the skip message using original values
-                 sqlStatements += `-- Skipping row index ${index}: Missing original value for '${detectedCampaignHeader}' or '${detectedSourceHeader}' (Original Values: Campaign='${campaignValueEscaped}', Source='${sourceValueEscaped}')\n`;
+                // Source Format: WHERE clause uses original campaign AND source
+                const sourceValueEscaped = originalSourceValue.replace(/'/g, "''");
+                if (originalCampaignValue && originalSourceValue) {
+                     // Use backticks (`) around header names in WHERE clause
+                    whereClause = `WHERE \`${detectedCampaignHeader}\` = '${campaignValueEscaped}' AND \`${detectedSourceHeader}\` = '${sourceValueEscaped}'`;
+                    canGenerate = true;
+                } else {
+                    skipReason = `Missing original value for '${detectedCampaignHeader}' or '${detectedSourceHeader}' (Original Values: Campaign='${campaignValueEscaped}', Source='${sourceValueEscaped}')`;
+                }
+            }
+
+            // Generate SQL statement if possible
+            if (canGenerate) {
+                 sqlStatements += `UPDATE ${tableName} SET pretty_name = '${prettyNameEscaped}', network = '${networkEscaped}' ${whereClause};\n`;
+            } else {
+                 // Provide context in the skip message
+                 sqlStatements += `-- Skipping row index ${index}: ${skipReason}\n`;
             }
         });
 
