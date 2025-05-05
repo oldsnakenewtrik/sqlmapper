@@ -97,6 +97,32 @@
         #rulesList .list-group-item {
             padding: 0.5rem 1rem;
         }
+
+        /* Group header styles */
+        .group-header {
+            background-color: #f8f9fa;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        .group-header:hover {
+            background-color: #e9ecef;
+        }
+
+        .group-header td {
+            padding: 0.75rem;
+        }
+
+        .group-collapsed .group-item {
+            display: none;
+        }
+
+        .group-toggle-icon {
+            display: inline-block;
+            width: 16px;
+            text-align: center;
+            margin-right: 8px;
+        }
     </style>
 </head>
 <body>
@@ -168,9 +194,19 @@
                     </select>
                 </div>
                 <div class="col-md-3">
-                    <div class="form-check form-switch">
-                        <input class="form-check-input" type="checkbox" id="showMappedOnly">
-                        <label class="form-check-label" for="showMappedOnly">Show Mapped Only</label>
+                    <div class="d-flex flex-column">
+                        <div class="form-check form-switch mb-2">
+                            <input class="form-check-input" type="checkbox" id="showMappedOnly">
+                            <label class="form-check-label" for="showMappedOnly">Show Mapped Only</label>
+                        </div>
+                        <select id="groupingMethod" class="form-select">
+                            <option value="none">No Grouping</option>
+                            <option value="source">Group by Source</option>
+                            <option value="network">Group by Network</option>
+                            <option value="campaign_prefix">Group by Campaign Prefix</option>
+                            <option value="rt_source">Group by RT Source</option>
+                            <option value="rt_campaign_prefix">Group by RT Campaign Prefix</option>
+                        </select>
                     </div>
                 </div>
             </div>
@@ -304,7 +340,8 @@
                 networks: [],
                 namesByNetwork: {}
             },
-            autoApplyRules: true // Default to auto-apply rules
+            autoApplyRules: true, // Default to auto-apply rules
+            groupingMethod: 'none' // Default to no grouping
         };
 
         // DOM Elements
@@ -330,6 +367,7 @@
                 sourceTypeFilter: document.getElementById('sourceTypeFilter'),
                 networkFilter: document.getElementById('networkFilter'),
                 showMappedOnly: document.getElementById('showMappedOnly'),
+                groupingMethod: document.getElementById('groupingMethod'),
                 networkOrderList: document.getElementById('networkOrderList'),
                 nameOrderList: document.getElementById('nameOrderList'),
                 orderNetworkSelect: document.getElementById('orderNetworkSelect'),
@@ -431,6 +469,11 @@
             elements.showMappedOnly.addEventListener('change', function() {
                 appState.filters.mappedOnly = this.checked;
                 applyFilters(elements);
+            });
+
+            elements.groupingMethod.addEventListener('change', function() {
+                appState.groupingMethod = this.value;
+                renderTable(elements);
             });
 
             elements.orderNetworkSelect.addEventListener('change', function() {
@@ -886,9 +929,138 @@
                 }
             }
 
-            appState.mappings.forEach((mapping, index) => {
-                if (!shouldShowMapping(mapping)) return;
+            // Filter mappings that should be shown
+            const filteredMappings = appState.mappings.filter(mapping => shouldShowMapping(mapping));
 
+            // If no grouping is selected, render normally
+            if (appState.groupingMethod === 'none') {
+                filteredMappings.forEach(mapping => {
+                    renderMappingRow(mapping, elements);
+                });
+                return;
+            }
+
+            // Group the mappings based on the selected grouping method
+            const groups = groupMappings(filteredMappings);
+
+            // Render each group
+            Object.keys(groups).forEach(groupKey => {
+                const groupMappings = groups[groupKey];
+
+                // Skip empty groups
+                if (groupMappings.length === 0) return;
+
+                // Create group header
+                const groupHeader = document.createElement('tr');
+                groupHeader.className = 'group-header';
+                groupHeader.dataset.group = groupKey;
+
+                // Determine the number of columns based on data format
+                let colSpan = 7; // Default for Matomo
+                if (appState.dataFormat === 'redtrack') {
+                    colSpan = 8;
+                } else if (appState.dataFormat === 'redtrack_new') {
+                    colSpan = 10;
+                }
+
+                groupHeader.innerHTML = `
+                    <td colspan="${colSpan}">
+                        <span class="group-toggle-icon">▼</span>
+                        ${groupKey} (${groupMappings.length} items)
+                    </td>
+                `;
+
+                // Add click event to toggle group visibility
+                groupHeader.addEventListener('click', function() {
+                    const groupId = this.dataset.group;
+                    const groupContainer = document.querySelector(`.group-container[data-group="${groupId}"]`);
+                    if (groupContainer) {
+                        groupContainer.classList.toggle('group-collapsed');
+
+                        // Update toggle icon
+                        const toggleIcon = this.querySelector('.group-toggle-icon');
+                        if (toggleIcon) {
+                            toggleIcon.textContent = groupContainer.classList.contains('group-collapsed') ? '▶' : '▼';
+                        }
+                    }
+                });
+
+                elements.campaignTableBody.appendChild(groupHeader);
+
+                // Create group container
+                const groupContainer = document.createElement('tbody');
+                groupContainer.className = 'group-container';
+                groupContainer.dataset.group = groupKey;
+
+                // Add group items
+                groupMappings.forEach(mapping => {
+                    const row = renderMappingRow(mapping, elements, true);
+                    row.classList.add('group-item');
+                    groupContainer.appendChild(row);
+                });
+
+                elements.campaignTableBody.appendChild(groupContainer);
+            });
+
+            // Function to group mappings based on the selected method
+            function groupMappings(mappings) {
+                const groups = {};
+
+                mappings.forEach(mapping => {
+                    let groupKey = 'Other';
+
+                    switch (appState.groupingMethod) {
+                        case 'source':
+                            groupKey = mapping.source || 'Unknown Source';
+                            break;
+
+                        case 'network':
+                            groupKey = mapping.originalNetwork || 'Unknown Network';
+                            break;
+
+                        case 'campaign_prefix':
+                            // Extract prefix (first word or first few characters)
+                            if (mapping.originalName) {
+                                const words = mapping.originalName.split(' ');
+                                if (words.length > 0) {
+                                    groupKey = words[0];
+                                } else {
+                                    groupKey = mapping.originalName.substring(0, 10);
+                                }
+                            }
+                            break;
+
+                        case 'rt_source':
+                            groupKey = mapping.rtSource || 'Unknown RT Source';
+                            break;
+
+                        case 'rt_campaign_prefix':
+                            // Extract prefix from RT Campaign
+                            if (mapping.rtCampaign) {
+                                const words = mapping.rtCampaign.split(' ');
+                                if (words.length > 0) {
+                                    groupKey = words[0];
+                                } else {
+                                    groupKey = mapping.rtCampaign.substring(0, 10);
+                                }
+                            }
+                            break;
+                    }
+
+                    // Initialize group if it doesn't exist
+                    if (!groups[groupKey]) {
+                        groups[groupKey] = [];
+                    }
+
+                    // Add mapping to group
+                    groups[groupKey].push(mapping);
+                });
+
+                return groups;
+            }
+
+            // Function to render a single mapping row
+            function renderMappingRow(mapping, elements, returnRow = false) {
                 const row = document.createElement('tr');
                 row.dataset.id = mapping.id;
 
@@ -1015,8 +1187,14 @@
                     `;
                 }
 
+                // If returnRow is true, return the row instead of appending it
+                if (returnRow) {
+                    return row;
+                }
+
+                // Otherwise append it to the table body
                 elements.campaignTableBody.appendChild(row);
-            });
+            }
 
             // Add event listeners to inputs
             document.querySelectorAll('.network-input, .name-input').forEach(input => {
