@@ -81,6 +81,22 @@
         #networkOrderList .list-group-item:last-child, #nameOrderList .list-group-item:last-child {
             border-bottom: none;
         }
+
+        /* Unmapped row highlighting */
+        .unmapped {
+            background-color: #fff3cd;
+        }
+
+        /* Copy buttons */
+        .copy-to-pretty-btn {
+            font-size: 0.7rem;
+            padding: 0.1rem 0.3rem;
+        }
+
+        /* Rule list styles */
+        #rulesList .list-group-item {
+            padding: 0.5rem 1rem;
+        }
     </style>
 </head>
 <body>
@@ -177,6 +193,42 @@
                 </table>
             </div>
 
+            <!-- Auto-Mapping Rules -->
+            <div class="card mt-4 mb-4">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h2 class="h5 mb-0">Auto-Mapping Rules</h2>
+                    <div>
+                        <button id="applyRulesBtn" class="btn btn-primary">Apply Rules</button>
+                        <button id="saveRulesBtn" class="btn btn-outline-secondary ms-2">Save Rules</button>
+                        <button id="loadRulesBtn" class="btn btn-outline-secondary ms-2">Load Rules</button>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="row mb-3">
+                        <div class="col-md-12">
+                            <p>Automatically map entries based on predefined rules. Rules are applied in order.</p>
+                            <div class="form-check form-switch mb-3">
+                                <input class="form-check-input" type="checkbox" id="autoApplyRules" checked>
+                                <label class="form-check-label" for="autoApplyRules">Auto-apply rules when loading data</label>
+                            </div>
+                            <div class="list-group" id="rulesList">
+                                <!-- Rules will be added here dynamically -->
+                            </div>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-12">
+                            <h3 class="h6 mt-3">Save/Load Mappings</h3>
+                            <div class="btn-group">
+                                <button id="saveMappingsBtn" class="btn btn-outline-primary">Save Mappings</button>
+                                <button id="loadMappingsBtn" class="btn btn-outline-primary">Load Mappings</button>
+                                <input type="file" id="loadMappingsFile" accept=".json" style="display: none;">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- Order Manager -->
             <div class="card mt-4 mb-4">
                 <div class="card-header d-flex justify-content-between align-items-center">
@@ -230,6 +282,9 @@
     <script src="https://cdn.jsdelivr.net/npm/papaparse@5.3.2/papaparse.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
 
+    <!-- Rule Engine -->
+    <script src="js/rule-engine.js"></script>
+
     <!-- Application Script -->
     <script>
         // Application State
@@ -248,7 +303,8 @@
             ordering: {
                 networks: [],
                 namesByNetwork: {}
-            }
+            },
+            autoApplyRules: true // Default to auto-apply rules
         };
 
         // DOM Elements
@@ -278,7 +334,16 @@
                 nameOrderList: document.getElementById('nameOrderList'),
                 orderNetworkSelect: document.getElementById('orderNetworkSelect'),
                 updateOrderBtn: document.getElementById('updateOrderBtn'),
-                resetOrderBtn: document.getElementById('resetOrderBtn')
+                resetOrderBtn: document.getElementById('resetOrderBtn'),
+                // New rule engine elements
+                applyRulesBtn: document.getElementById('applyRulesBtn'),
+                saveRulesBtn: document.getElementById('saveRulesBtn'),
+                loadRulesBtn: document.getElementById('loadRulesBtn'),
+                autoApplyRules: document.getElementById('autoApplyRules'),
+                rulesList: document.getElementById('rulesList'),
+                saveMappingsBtn: document.getElementById('saveMappingsBtn'),
+                loadMappingsBtn: document.getElementById('loadMappingsBtn'),
+                loadMappingsFile: document.getElementById('loadMappingsFile')
             };
 
             // Set up event listeners
@@ -381,6 +446,42 @@
                 resetOrder(elements);
                 renderOrderLists(elements);
             });
+
+            // Rule engine event listeners
+            elements.applyRulesBtn.addEventListener('click', function() {
+                applyRulesToMappings(elements);
+            });
+
+            elements.saveRulesBtn.addEventListener('click', function() {
+                saveRulesToFile();
+            });
+
+            elements.loadRulesBtn.addEventListener('click', function() {
+                // Trigger file input click
+                elements.loadMappingsFile.click();
+            });
+
+            elements.autoApplyRules.addEventListener('change', function() {
+                appState.autoApplyRules = this.checked;
+            });
+
+            elements.saveMappingsBtn.addEventListener('click', function() {
+                saveMappingsToFile();
+            });
+
+            elements.loadMappingsBtn.addEventListener('click', function() {
+                elements.loadMappingsFile.click();
+            });
+
+            elements.loadMappingsFile.addEventListener('change', function(event) {
+                const file = event.target.files[0];
+                if (file) {
+                    loadMappingsFromFile(file, elements);
+                }
+            });
+
+            // Render rules list
+            renderRulesList(elements);
 
             // Add keyboard shortcuts for copy/paste
             document.addEventListener('keydown', function(e) {
@@ -564,6 +665,11 @@
 
             appState.mappings = Array.from(uniqueEntries.values());
 
+            // Apply rules if auto-apply is enabled
+            if (appState.autoApplyRules) {
+                applyRulesToMappings(elements);
+            }
+
             // Initialize ordering
             initializeOrdering();
 
@@ -642,13 +748,28 @@
                 const row = document.createElement('tr');
                 row.dataset.id = mapping.id;
 
+                // Add unmapped class if either pretty network or pretty name is empty
+                if (!mapping.prettyNetwork || !mapping.prettyName) {
+                    row.classList.add('unmapped');
+                }
+
                 if (appState.dataFormat === 'redtrack') {
                     // RedTrack format with device type
                     row.innerHTML = `
                         <td>${mapping.id + 1}</td>
                         <td>${mapping.source}</td>
-                        <td>${mapping.originalName}</td>
-                        <td>${mapping.originalNetwork}</td>
+                        <td>${mapping.originalName}
+                            <button class="btn btn-sm btn-outline-secondary copy-to-pretty-btn"
+                                    data-id="${mapping.id}" data-field="originalName" data-target="prettyName">
+                                ↓
+                            </button>
+                        </td>
+                        <td>${mapping.originalNetwork}
+                            <button class="btn btn-sm btn-outline-secondary copy-to-pretty-btn"
+                                    data-id="${mapping.id}" data-field="originalNetwork" data-target="prettyNetwork">
+                                ↓
+                            </button>
+                        </td>
                         <td>${mapping.deviceType || ''}</td>
                         <td>
                             <input type="text" class="form-control network-input" value="${mapping.prettyNetwork}"
@@ -672,8 +793,18 @@
                     row.innerHTML = `
                         <td>${mapping.id + 1}</td>
                         <td>${mapping.source}</td>
-                        <td>${mapping.originalName}</td>
-                        <td>${mapping.originalNetwork}</td>
+                        <td>${mapping.originalName}
+                            <button class="btn btn-sm btn-outline-secondary copy-to-pretty-btn"
+                                    data-id="${mapping.id}" data-field="originalName" data-target="prettyName">
+                                ↓
+                            </button>
+                        </td>
+                        <td>${mapping.originalNetwork}
+                            <button class="btn btn-sm btn-outline-secondary copy-to-pretty-btn"
+                                    data-id="${mapping.id}" data-field="originalNetwork" data-target="prettyNetwork">
+                                ↓
+                            </button>
+                        </td>
                         <td>
                             <input type="text" class="form-control network-input" value="${mapping.prettyNetwork}"
                                    data-id="${mapping.id}" data-field="prettyNetwork">
@@ -737,6 +868,35 @@
                         appState.copiedValue = mapping.prettyName;
                         navigator.clipboard.writeText(mapping.prettyName);
                         alert('Name copied to clipboard!');
+                    }
+                });
+            });
+
+            // Add event listeners to "Copy to Pretty" buttons
+            document.querySelectorAll('.copy-to-pretty-btn').forEach(button => {
+                button.addEventListener('click', function() {
+                    const id = parseInt(this.dataset.id);
+                    const sourceField = this.dataset.field;
+                    const targetField = this.dataset.target;
+                    const mapping = appState.mappings.find(m => m.id === id);
+
+                    if (mapping) {
+                        // Copy the value from source field to target field
+                        mapping[targetField] = mapping[sourceField];
+
+                        // Update the input field
+                        const input = document.querySelector(`input[data-id="${id}"][data-field="${targetField}"]`);
+                        if (input) {
+                            input.value = mapping[sourceField];
+                        }
+
+                        // Remove unmapped class if both fields are now filled
+                        if (mapping.prettyNetwork && mapping.prettyName) {
+                            const row = document.querySelector(`tr[data-id="${id}"]`);
+                            if (row) {
+                                row.classList.remove('unmapped');
+                            }
+                        }
                     }
                 });
             });
@@ -1009,6 +1169,124 @@
         // Reset order
         function resetOrder(elements) {
             initializeOrdering();
+        }
+
+        // Apply rules to mappings
+        function applyRulesToMappings(elements) {
+            // Apply rules to all mappings
+            appState.mappings = RuleEngine.applyRules(appState.mappings);
+
+            // Re-render the table
+            renderTable(elements);
+
+            // Update ordering
+            initializeOrdering();
+            renderOrderLists(elements);
+        }
+
+        // Render rules list
+        function renderRulesList(elements) {
+            elements.rulesList.innerHTML = '';
+
+            // Get rule names
+            const ruleNames = RuleEngine.getRuleNames();
+
+            // Create a list item for each rule
+            ruleNames.forEach(ruleName => {
+                const item = document.createElement('div');
+                item.className = 'list-group-item d-flex justify-content-between align-items-center';
+                item.innerHTML = `
+                    <div>
+                        <span>${ruleName}</span>
+                    </div>
+                    <div>
+                        <div class="form-check form-switch">
+                            <input class="form-check-input rule-toggle" type="checkbox"
+                                   id="rule-${ruleName.replace(/\s+/g, '-').toLowerCase()}"
+                                   data-rule="${ruleName}" checked>
+                        </div>
+                    </div>
+                `;
+
+                elements.rulesList.appendChild(item);
+            });
+
+            // Add event listeners to rule toggles
+            document.querySelectorAll('.rule-toggle').forEach(toggle => {
+                toggle.addEventListener('change', function() {
+                    const ruleName = this.dataset.rule;
+                    RuleEngine.toggleRule(ruleName, this.checked);
+                });
+            });
+        }
+
+        // Save rules to file
+        function saveRulesToFile() {
+            const rulesJson = RuleEngine.exportRules();
+            const blob = new Blob([rulesJson], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+
+            // Create a temporary link and click it
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'sqlmapper-rules.json';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        // Save mappings to file
+        function saveMappingsToFile() {
+            const data = {
+                mappings: appState.mappings,
+                ordering: appState.ordering
+            };
+
+            const json = JSON.stringify(data, null, 2);
+            const blob = new Blob([json], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+
+            // Create a temporary link and click it
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'sqlmapper-mappings.json';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        // Load mappings from file
+        function loadMappingsFromFile(file, elements) {
+            const reader = new FileReader();
+
+            reader.onload = function(e) {
+                try {
+                    const data = JSON.parse(e.target.result);
+
+                    if (data.mappings && Array.isArray(data.mappings)) {
+                        appState.mappings = data.mappings;
+                    }
+
+                    if (data.ordering) {
+                        appState.ordering = data.ordering;
+                    } else {
+                        // If no ordering in the file, initialize it
+                        initializeOrdering();
+                    }
+
+                    // Render everything
+                    renderTable(elements);
+                    renderOrderLists(elements);
+
+                    alert('Mappings loaded successfully!');
+                } catch (error) {
+                    alert('Error loading mappings: ' + error.message);
+                }
+            };
+
+            reader.readAsText(file);
         }
 
         // Generate SQL query
