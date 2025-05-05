@@ -226,12 +226,30 @@ document.addEventListener('DOMContentLoaded', function() {
             const tr = document.createElement('tr');
             tr.dataset.index = index; // Store index for easy updates
 
-            tr.innerHTML = `
-                <td>${escapeHtml(row.original_campaign_name)}</td>
-                <td>${escapeHtml(isNetworkFormat ? row.original_network : row.original_source)}</td> {/* Display original network OR source */}
-                <td contenteditable="true" data-column="pretty_name">${escapeHtml(row.pretty_name)}</td>
-                <td contenteditable="true" data-column="network">${escapeHtml(row.network)}</td>
-            `;
+            // Cell 1: Original Campaign Name
+            const td1 = document.createElement('td');
+            td1.textContent = row.original_campaign_name || ''; // Use textContent for safety
+            tr.appendChild(td1);
+
+            // Cell 2: Original Network or Source
+            const td2 = document.createElement('td');
+            td2.textContent = isNetworkFormat ? (row.original_network || '') : (row.original_source || '');
+            tr.appendChild(td2);
+
+            // Cell 3: Pretty Name (Editable)
+            const td3 = document.createElement('td');
+            td3.textContent = row.pretty_name || ''; // Defaulted to campaign name
+            td3.contentEditable = true;
+            td3.dataset.column = 'pretty_name';
+            tr.appendChild(td3);
+
+            // Cell 4: Network (Editable)
+            const td4 = document.createElement('td');
+            td4.textContent = row.network || ''; // Defaulted to network or source
+            td4.contentEditable = true;
+            td4.dataset.column = 'network';
+            tr.appendChild(td4);
+
             // Add appropriate headers dynamically? For now, keep static headers in HTML
             // Or update table headers here if needed:
             // document.getElementById('originalSourceHeaderCell').textContent = isNetworkFormat ? 'Original Network' : 'Original Source';
@@ -409,12 +427,13 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         // Ensure it's a string before replacing
         const safeString = String(unsafe);
+        // *** Corrected line below ***
         return safeString
              .replace(/&/g, "&") // Use & for ampersand
              .replace(/</g, "<")  // Use < for less than
              .replace(/>/g, ">")  // Use > for greater than
-             .replace(/"/g, '"') // Use " for double quote (using single quotes for the JS string)
-             .replace(/'/g, "&#039;"); // Use &#039; for single quote (or ')
+             .replace(/"/g, "&amp;quot;") // Use &amp;quot; for double quote
+             .replace(/'/g, "&#039;"); // Use &#039; for single quote
     }
 
 });
