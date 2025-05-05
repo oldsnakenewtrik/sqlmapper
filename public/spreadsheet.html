@@ -544,7 +544,41 @@
 
                     // Process the data
                     appState.csvData = results.data;
-                    elements.uploadStatus.innerHTML = `<div class="alert alert-success">File loaded successfully! ${appState.csvData.length} rows found.</div>`;
+
+                    // Auto-detect format based on headers
+                    if (results.meta.fields) {
+                        const headers = results.meta.fields;
+
+                        // Check for RedTrack format with click_id, campaign, source, rt_campaign fields
+                        if (headers.includes('click_id') && headers.includes('campaign') &&
+                            headers.includes('source') && headers.includes('rt_campaign')) {
+                            appState.dataFormat = 'redtrack_new';
+                            elements.formatRedTrack.checked = true;
+                            elements.formatMatomo.checked = false;
+                            elements.tableNameInput.value = 'matomotransfers.rt_streamer.log_visit';
+                            console.log('Format auto-detected as new RedTrack format based on headers');
+                        }
+                        // Check for RedTrack format with deduced_source, campaign_name, utm_source
+                        else if (headers.includes('deduced_source') && headers.includes('campaign_name') &&
+                                headers.includes('utm_source')) {
+                            appState.dataFormat = 'redtrack';
+                            elements.formatRedTrack.checked = true;
+                            elements.formatMatomo.checked = false;
+                            elements.tableNameInput.value = 'matomotransfers.rt_streamer.log_visit';
+                            console.log('Format auto-detected as RedTrack format based on headers');
+                        }
+                        // Check for Matomo format
+                        else if (headers.includes('deduced_source') && headers.includes('campaign_name') &&
+                                headers.includes('campaign_source')) {
+                            appState.dataFormat = 'matomo';
+                            elements.formatMatomo.checked = true;
+                            elements.formatRedTrack.checked = false;
+                            elements.tableNameInput.value = 'matomotransfers.matomo_export.log_visit';
+                            console.log('Format auto-detected as Matomo format based on headers');
+                        }
+                    }
+
+                    elements.uploadStatus.innerHTML = `<div class="alert alert-success">File loaded successfully! ${appState.csvData.length} rows found. Format detected: ${appState.dataFormat}</div>`;
 
                     // Initialize mappings
                     initializeMappings(elements);
@@ -661,6 +695,47 @@
                         uniqueEntries.set(key, entry);
                     }
                 });
+            } else if (appState.dataFormat === 'redtrack_new') {
+                // Process new RedTrack format
+                appState.csvData.forEach((row, index) => {
+                    let key;
+                    let entry;
+
+                    // For new RedTrack format, use source + campaign + device as key
+                    const deviceType = row.device || '';
+                    const campaignName = row.campaign || '';
+                    const source = row.source || '';
+                    const network = row.network || '';
+                    const rtSource = row.rt_source || '';
+                    const rtCampaign = row.rt_campaign || '';
+                    const rtMedium = row.rt_medium || '';
+
+                    // Create a unique key
+                    key = `${source || ''}-${campaignName || ''}-${deviceType || ''}`;
+
+                    // Determine the best values for mapping
+                    const bestSource = source || rtSource || '';
+                    const bestCampaign = campaignName || rtCampaign || '';
+                    const bestNetwork = network || rtSource || source || '';
+
+                    entry = {
+                        id: index,
+                        source: bestSource,
+                        originalName: bestCampaign,
+                        originalNetwork: bestNetwork,
+                        prettyNetwork: bestNetwork,
+                        prettyName: bestCampaign,
+                        deviceType: deviceType,
+                        rtSource: rtSource,
+                        rtCampaign: rtCampaign,
+                        rtMedium: rtMedium,
+                        clickId: row.click_id || ''
+                    };
+
+                    if (!uniqueEntries.has(key) && key !== '-') {
+                        uniqueEntries.set(key, entry);
+                    }
+                });
             }
 
             appState.mappings = Array.from(uniqueEntries.values());
@@ -714,7 +789,7 @@
             // Update table headers based on data format
             const tableHeaders = document.querySelector('#campaignTable thead tr');
             if (tableHeaders) {
-                if (appState.dataFormat === 'redtrack') {
+                if (appState.dataFormat === 'redtrack' || appState.dataFormat === 'redtrack_new') {
                     // Add device type column for RedTrack format
                     if (!document.getElementById('deviceTypeHeader')) {
                         tableHeaders.innerHTML = `
@@ -722,7 +797,7 @@
                             <th>Source Type</th>
                             <th>Original Name</th>
                             <th>Original Network</th>
-                            <th>Device Type</th>
+                            <th id="deviceTypeHeader">Device Type</th>
                             <th>Pretty Network</th>
                             <th>Pretty Name</th>
                             <th width="100">Actions</th>
@@ -753,7 +828,7 @@
                     row.classList.add('unmapped');
                 }
 
-                if (appState.dataFormat === 'redtrack') {
+                if (appState.dataFormat === 'redtrack' || appState.dataFormat === 'redtrack_new') {
                     // RedTrack format with device type
                     row.innerHTML = `
                         <td>${mapping.id + 1}</td>
@@ -984,7 +1059,7 @@
                 const searchText = appState.filters.text.toLowerCase();
                 let textMatch = false;
 
-                if (appState.dataFormat === 'redtrack') {
+                if (appState.dataFormat === 'redtrack' || appState.dataFormat === 'redtrack_new') {
                     textMatch =
                         (mapping.source || '').toLowerCase().includes(searchText) ||
                         (mapping.originalName || '').toLowerCase().includes(searchText) ||
@@ -992,7 +1067,10 @@
                         (mapping.prettyNetwork || '').toLowerCase().includes(searchText) ||
                         (mapping.prettyName || '').toLowerCase().includes(searchText) ||
                         (mapping.deviceType || '').toLowerCase().includes(searchText) ||
-                        (mapping.utmCampaign || '').toLowerCase().includes(searchText);
+                        (mapping.utmCampaign || '').toLowerCase().includes(searchText) ||
+                        (mapping.rtSource || '').toLowerCase().includes(searchText) ||
+                        (mapping.rtCampaign || '').toLowerCase().includes(searchText) ||
+                        (mapping.rtMedium || '').toLowerCase().includes(searchText);
                 } else {
                     textMatch =
                         (mapping.source || '').toLowerCase().includes(searchText) ||
